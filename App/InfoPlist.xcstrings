@@ -1,0 +1,42 @@
+{
+  "sourceLanguage": "ko",
+  "strings": {
+    "NSAudioCaptureUsageDescription": {
+      "comment": "시스템 오디오 녹음 권한 요청 문구",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Records audio from your meeting app."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "회의 앱의 소리를 녹음합니다."
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription": {
+      "comment": "마이크 권한 요청 문구",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Records your voice during meetings."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "회의 중 내 목소리를 녹음합니다."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -1,0 +1,4 @@
+build/
+*.xcodeproj/
+App/Info.plist
+.DS_Store

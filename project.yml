@@ -1,0 +1,34 @@
+name: EarShot
+options:
+  bundleIdPrefix: io.taebong
+  deploymentTarget:
+    macOS: "14.2"
+  # 한국어·영어 외 언어는 영어로 보인다.
+  developmentLanguage: en
+settings:
+  base:
+    CODE_SIGN_IDENTITY: "EarShot Local Signing" # 이 맥 키체인의 자체 서명 — 다시 빌드해도 권한(TCC)이 유지된다
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+targets:
+  EarShot:
+    type: application
+    platform: macOS
+    sources: [App]
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: EarShot
+        CFBundleDevelopmentRegion: en
+        LSUIElement: true
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # 언어별 문구는 App/InfoPlist.xcstrings
+        NSMicrophoneUsageDescription: Records your voice during meetings.
+        NSAudioCaptureUsageDescription: Records audio from your meeting app.
