@@ -251,11 +251,19 @@ final class AudioSettings: ObservableObject {
 
     private static let micKey = "micDeviceUID"
     private static let sourceKey = "captureSource"
+    nonisolated private static let splitKey = "splitChannels"
 
     /// nil 이면 시스템 기본 입력
     @Published private(set) var micUID: String?
     @Published private(set) var source: CaptureSource
     @Published private(set) var inputDevices: [InputDevice] = []
+    /// 내 목소리(마이크)는 왼쪽, 상대(맥 소리)는 오른쪽으로 나눠 저장할지. 기본 켜짐
+    @Published private(set) var splitChannels = AudioSettings.splitsChannels
+
+    /// 섞을 때(백그라운드) 읽는다.
+    nonisolated static var splitsChannels: Bool {
+        UserDefaults.standard.object(forKey: splitKey) as? Bool ?? true
+    }
 
     private init() {
         micUID = UserDefaults.standard.string(forKey: Self.micKey)
@@ -280,6 +288,13 @@ final class AudioSettings: ObservableObject {
         UserDefaults.standard.set(source.rawValue, forKey: Self.sourceKey)
         self.source = source
         MicMonitor.log("녹음할 소리 → \(source.title)")
+    }
+
+    func setSplitChannels(_ on: Bool) {
+        guard on != splitChannels else { return }
+        UserDefaults.standard.set(on, forKey: Self.splitKey)
+        splitChannels = on
+        MicMonitor.log("좌우 나누기 → \(on)")
     }
 
     private func refreshDevices() {

@@ -87,6 +87,9 @@ struct EarShotApp: App {
                 ForEach(CaptureSource.allCases, id: \.self) { source in
                     Toggle(source.title, isOn: Binding(get: { audioSettings.source == source }, set: { _ in audioSettings.setSource(source) }))
                 }
+                Divider()
+                // 받아쓰기에서 누가 말했는지 가를 수 있게. 마이크만 녹음은 나눌 게 없다.
+                Toggle("내 목소리·상대 좌우로 나누기", isOn: Binding(get: { audioSettings.splitChannels }, set: { audioSettings.setSplitChannels($0) }))
             }
             Menu("마이크") {
                 Toggle("시스템 기본", isOn: Binding(get: { audioSettings.micUID == nil }, set: { _ in audioSettings.setMic(nil) }))

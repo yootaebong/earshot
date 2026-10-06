@@ -26,6 +26,7 @@ When you stop, it converts the recording (with a progress readout in the menu ba
 | 🎙️ **Manual recording** | `⌃⌥R` (control + option + R) or "Start Recording" in the menu. Works whichever app is in front |
 | 🔊 **Two sources, one file** | Meeting-app audio via a Core Audio process tap, your voice via the microphone. Mixed into a single m4a at the end |
 | 🧭 **Meeting app detection** | If a meeting app (Zoom, Slack, Chrome, Safari, Arc, Edge) is using the microphone, only that app is recorded; otherwise the whole Mac |
+| ↔️ **You left, others right** | The saved file puts your microphone on the left channel and the meeting audio on the right, so a transcription tool can tell who spoke. Turn it off under "Audio Source" to get a normal mix. "Microphone only" recordings are not split. Without headphones, the other side leaks into your microphone a little |
 | 🎚️ **Device choice** | "Microphone" menu (system default or a specific device) and "Audio Source" menu (meeting app / entire Mac / microphone only) |
 | 📊 **Level meters** | Mac audio and microphone levels in the menu while recording. Notifies you if one side stays silent for 15 seconds |
 | 🔌 **Survives device changes** | Switching earphones or Bluetooth splits the recording into pieces and joins them at the end |

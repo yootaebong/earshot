@@ -878,6 +878,22 @@
           }
         }
       }
+    },
+    "내 목소리·상대 좌우로 나누기": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Split Me (Left) / Others (Right)"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "내 목소리·상대 좌우로 나누기"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

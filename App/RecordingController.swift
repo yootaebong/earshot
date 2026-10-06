@@ -531,6 +531,9 @@ final class RecordingController: ObservableObject {
             var cursor = CMTime.zero
             var unreadable: [String] = []
             var readCount = 0
+            // 좌우로 나눌 때 쓴다 — 왼쪽 마이크(나), 오른쪽 맥 소리(상대)
+            var micTracks: [AVAssetTrack] = []
+            var appTracks: [AVAssetTrack] = []
             for sources in segments {
                 let earliest = sources.compactMap(\.hostTime).min()
                 var segmentEnd = cursor
@@ -562,6 +565,7 @@ final class RecordingController: ObservableObject {
                         continue
                     }
                     readCount += 1
+                    if source.isMic { micTracks.append(target) } else { appTracks.append(target) }
                     segmentEnd = max(segmentEnd, at + range.duration)
                 }
                 cursor = segmentEnd
@@ -584,20 +588,24 @@ final class RecordingController: ObservableObject {
                 return
             }
 
-            guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
-                throw RecordingError("내보내기 세션 생성 실패")
-            }
             let mixed = directory.appending(path: "mixed.m4a")
             try? FileManager.default.removeItem(at: mixed)
-            let watcher = watchProgress(of: export, key: key)
-            defer { watcher.cancel() }
-            if #available(macOS 15, *) {
-                try await export.export(to: mixed, as: .m4a)
+            if AudioSettings.splitsChannels, !micTracks.isEmpty, !appTracks.isEmpty {
+                try await renderSplit(composition, left: micTracks, right: appTracks, to: mixed, key: key)
             } else {
-                export.outputURL = mixed
-                export.outputFileType = .m4a
-                await export.export()
-                if let error = export.error { throw error }
+                guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
+                    throw RecordingError("내보내기 세션 생성 실패")
+                }
+                let watcher = watchProgress(of: export, key: key)
+                defer { watcher.cancel() }
+                if #available(macOS 15, *) {
+                    try await export.export(to: mixed, as: .m4a)
+                } else {
+                    export.outputURL = mixed
+                    export.outputFileType = .m4a
+                    await export.export()
+                    if let error = export.error { throw error }
+                }
             }
             let meta = RecordingMeta(startedAt: startedAt, appName: appName, duration: Int(duration.rounded()))
             let output = try await moveToPending(mixed, meta: meta)
@@ -613,6 +621,117 @@ final class RecordingController: ObservableObject {
 }
 
 extension RecordingController {
+    /// 왼쪽에 left 트랙들, 오른쪽에 right 트랙들을 각각 모노로 섞어 스테레오 AAC m4a 로 쓴다.
+    /// 두 쪽을 1초씩 번갈아 읽어 메모리를 일정하게 둔다. 먼저 끝난 쪽은 무음으로 채운다.
+    nonisolated fileprivate static func renderSplit(_ asset: AVAsset, left: [AVAssetTrack], right: [AVAssetTrack],
+                                                    to url: URL, key: String) async throws {
+        let rate = 48_000.0
+        let pcm: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: rate, AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false,
+        ]
+        let reader = try AVAssetReader(asset: asset)
+        let outputs = [left, right].map { AVAssetReaderAudioMixOutput(audioTracks: $0, audioSettings: pcm) }
+        for output in outputs {
+            guard reader.canAdd(output) else { throw RecordingError("좌우 나누기 읽기 출력 추가 실패") }
+            reader.add(output)
+        }
+        guard reader.startReading() else { throw reader.error ?? RecordingError("좌우 나누기 읽기 시작 실패") }
+        defer { if reader.status == .reading { reader.cancelReading() } }
+
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2) else {
+            throw RecordingError("좌우 나누기 형식 생성 실패")
+        }
+        let file = try AVAudioFile(forWriting: url, settings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 192_000,
+        ], commonFormat: .pcmFormatFloat32, interleaved: false)
+
+        let chunk = Int(rate)
+        let total = max(asset.duration.seconds * rate, 1)
+        var queues: [[Float]] = [[], []]
+        /// 쪽마다 지금까지 큐에 넣은 샘플 수 = 다음 샘플의 위치
+        var positions = [0, 0]
+        var finished = [false, false]
+        var written = 0
+        var reported = -1
+        while true {
+            for side in 0..<2 where !finished[side] {
+                while queues[side].count < chunk {
+                    guard let buffer = outputs[side].copyNextSampleBuffer() else {
+                        finished[side] = true
+                        break
+                    }
+                    try appendSamples(buffer, rate: rate, to: &queues[side], position: &positions[side])
+                }
+            }
+            // 아직 읽는 쪽이 있으면 그쪽이 가진 만큼만, 다 끝났으면 남은 것 전부
+            let open = (0..<2).filter { !finished[$0] }
+            let count = open.isEmpty ? queues.map(\.count).max() ?? 0 : open.map { queues[$0].count }.min() ?? 0
+            if count == 0 {
+                if open.isEmpty { break }
+                continue
+            }
+            guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)),
+                  let channels = out.floatChannelData else { throw RecordingError("좌우 나누기 버퍼 생성 실패") }
+            out.frameLength = AVAudioFrameCount(count)
+            for side in 0..<2 {
+                let available = min(count, queues[side].count)
+                if available > 0 {
+                    queues[side].withUnsafeBufferPointer { source in
+                        channels[side].update(from: source.baseAddress!, count: available)
+                    }
+                    queues[side].removeFirst(available)
+                }
+                if available < count { (channels[side] + available).update(repeating: 0, count: count - available) }
+            }
+            try file.write(from: out)
+            written += count
+            let percent = Int(Double(written) / total * 100)
+            if percent != reported {
+                reported = percent
+                await ConversionStatus.shared.update(key, fraction: Double(written) / total)
+            }
+        }
+        if reader.status == .failed { throw reader.error ?? RecordingError("좌우 나누기 읽기 실패") }
+    }
+
+    /// 모노 Float32 인터리브 샘플 버퍼의 값을 queue 끝에 붙인다. 좌우가 어긋나지 않게 버퍼 시각(PTS)에 맞춘다 —
+    /// 빈 구간을 건너뛰어 시각이 앞서 있으면 그만큼 0 을 먼저 넣고, 겹치면 겹친 앞부분을 버린다.
+    nonisolated private static func appendSamples(_ sampleBuffer: CMSampleBuffer, rate: Double,
+                                                  to queue: inout [Float], position: inout Int) throws {
+        guard let description = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(description)?.pointee,
+              asbd.mSampleRate == rate, asbd.mChannelsPerFrame == 1, asbd.mBitsPerChannel == 32,
+              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0 else {
+            throw RecordingError("좌우 나누기 형식이 다름")
+        }
+        var blockBuffer: CMBlockBuffer?
+        var list = AudioBufferList()
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sampleBuffer, bufferListSizeNeededOut: nil, bufferListOut: &list, bufferListSize: MemoryLayout<AudioBufferList>.size,
+            blockBufferAllocator: nil, blockBufferMemoryAllocator: nil, flags: 0, blockBufferOut: &blockBuffer)
+        guard status == noErr else { throw RecordingError("좌우 나누기 샘플 읽기 실패 \(status)") }
+        try withExtendedLifetime(blockBuffer) {
+            guard let data = list.mBuffers.mData else { throw RecordingError("좌우 나누기 샘플 없음") }
+            let samples = UnsafeBufferPointer(start: data.assumingMemoryBound(to: Float.self),
+                                              count: Int(list.mBuffers.mDataByteSize) / MemoryLayout<Float>.size)
+            var skip = 0
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            if pts.isNumeric {
+                let start = Int((pts.seconds * rate).rounded())
+                if start > position {
+                    queue.append(contentsOf: repeatElement(0, count: start - position))
+                    position = start
+                } else if start < position {
+                    skip = min(position - start, samples.count)
+                }
+            }
+            queue.append(contentsOf: samples.dropFirst(skip))
+            position += samples.count - skip
+        }
+    }
+
     /// 내보내기 진행률을 0.5초마다 ConversionStatus 에 옮긴다. 끝나면 cancel 한다.
     nonisolated fileprivate static func watchProgress(of export: AVAssetExportSession, key: String) -> Task<Void, Never> {
         Task {
@@ -713,4 +832,7 @@ extension Notification.Name {
 struct MixSource: Sendable {
     let url: URL
     let hostTime: UInt64?
+
+    /// 마이크 조각인지(파일 이름 "NNN-mic.caf"). 아니면 맥 소리("NNN-app.caf")
+    var isMic: Bool { url.lastPathComponent.hasSuffix("-mic.caf") }
 }
