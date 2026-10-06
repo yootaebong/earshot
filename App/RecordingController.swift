@@ -522,6 +522,10 @@ final class RecordingController: ObservableObject {
     /// 녹음 폴더 안에 내보낸 뒤 메타(.json)를 먼저 쓰고 m4a 를 Pending 으로 옮긴다 — Pending 의 m4a 는 늘 다 쓴 파일이다.
     nonisolated private static func mix(segments: [[MixSource]], appName: String, startedAt: Date,
                                         removing directory: URL, prompt: Bool) async {
+        // 긴 회의는 내보내기에 수십 초 걸린다 — 그동안 메뉴에 진행률을 보인다.
+        let key = directory.lastPathComponent
+        await ConversionStatus.shared.begin(key, appName: appName)
+        defer { Task { @MainActor in ConversionStatus.shared.end(key) } }
         do {
             let composition = AVMutableComposition()
             var cursor = CMTime.zero
@@ -585,6 +589,8 @@ final class RecordingController: ObservableObject {
             }
             let mixed = directory.appending(path: "mixed.m4a")
             try? FileManager.default.removeItem(at: mixed)
+            let watcher = watchProgress(of: export, key: key)
+            defer { watcher.cancel() }
             if #available(macOS 15, *) {
                 try await export.export(to: mixed, as: .m4a)
             } else {
@@ -603,6 +609,62 @@ final class RecordingController: ObservableObject {
         } catch {
             MicMonitor.log("오류 저장 \(appName) \(startedAt.formatted(.iso8601)): \(error.localizedDescription)")
         }
+    }
+}
+
+extension RecordingController {
+    /// 내보내기 진행률을 0.5초마다 ConversionStatus 에 옮긴다. 끝나면 cancel 한다.
+    nonisolated fileprivate static func watchProgress(of export: AVAssetExportSession, key: String) -> Task<Void, Never> {
+        Task {
+            if #available(macOS 15, *) {
+                for await state in export.states(updateInterval: 0.5) {
+                    if case .exporting(let progress) = state {
+                        await ConversionStatus.shared.update(key, fraction: progress.fractionCompleted)
+                    }
+                }
+            } else {
+                while !Task.isCancelled {
+                    await ConversionStatus.shared.update(key, fraction: Double(export.progress))
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+            }
+        }
+    }
+}
+
+/// 녹음을 m4a 로 바꾸는 중인 것들. 메뉴와 메뉴 막대 아이콘이 본다.
+@MainActor
+final class ConversionStatus: ObservableObject {
+    static let shared = ConversionStatus()
+
+    struct Item: Identifiable {
+        let id: String
+        let appName: String
+        /// 0~1. 내보내기 전(트랙 읽는 중)은 0
+        var fraction: Double
+    }
+
+    /// 시작 순서대로
+    @Published private(set) var items: [Item] = []
+
+    /// 가장 먼저 시작한 것의 백분율. 없으면 nil
+    var percent: Int? { items.first.map { Int(($0.fraction * 100).rounded(.down)) } }
+
+    func begin(_ key: String, appName: String) {
+        guard !items.contains(where: { $0.id == key }) else { return }
+        items.append(Item(id: key, appName: appName, fraction: 0))
+    }
+
+    func update(_ key: String, fraction: Double) {
+        guard let index = items.firstIndex(where: { $0.id == key }) else { return }
+        let clamped = min(max(fraction, 0), 1)
+        // 1% 단위로만 다시 그린다.
+        guard Int(clamped * 100) != Int(items[index].fraction * 100) else { return }
+        items[index].fraction = clamped
+    }
+
+    func end(_ key: String) {
+        items.removeAll { $0.id == key }
     }
 }
 

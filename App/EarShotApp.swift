@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct EarShotApp: App {
@@ -8,6 +9,7 @@ struct EarShotApp: App {
     @StateObject private var delivery: Delivery
     @StateObject private var saveQueue: SaveQueue
     @StateObject private var audioSettings = AudioSettings.shared
+    @StateObject private var conversion = ConversionStatus.shared
 
     init() {
         // 로그인 실행(launchd)과 직접 실행이 겹치면 잠금을 못 잡은 쪽이 조용히 물러난다(exit 0 이라 KeepAlive 도 다시 안 띄운다).
@@ -17,6 +19,8 @@ struct EarShotApp: App {
         if LoginItem.handOffToLaunchdIfNeeded() { exit(0) }
         // 분류 기본값을 로그인 항목 설정(loginItemConfigured)보다 먼저 정한다 — 그 키로 예전 사용자를 가린다.
         _ = StorageSettings.loadCategories()
+        // 꺼져 있을 때 누른 알림도 받으려면 실행이 끝나기 전에 붙여야 한다.
+        UNUserNotificationCenter.current().delegate = NotificationRouter.shared
         let monitor = MicMonitor()
         _monitor = StateObject(wrappedValue: monitor)
         _recorder = StateObject(wrappedValue: RecordingController(monitor: monitor))
@@ -46,6 +50,10 @@ struct EarShotApp: App {
             }
             if let current = recorder.current {
                 Text("녹음 중: \(current.appName) \(recorder.elapsedText)")
+            }
+            // 멈춘 뒤 m4a 로 바꾸는 중. 2시간 회의면 40초쯤 걸린다.
+            ForEach(conversion.items) { item in
+                Text("변환 중: \(item.appName) \(Int((item.fraction * 100).rounded(.down)))%")
             }
             // 전역 단축키는 GlobalHotKey 가 잡는다. 여기 지정은 메뉴에 표시하려는 것.
             Button(recorder.isRecording ? String(localized: "녹음 멈추기") : String(localized: "녹음 시작")) { recorder.toggle() }
@@ -98,8 +106,12 @@ struct EarShotApp: App {
             Button("종료") { NSApp.terminate(nil) }
         } label: {
             Image(systemName: labelSymbol)
-            // 분류 안 됨 개수. 0이면 숫자 없음
-            if !saveQueue.pending.isEmpty { Text("\(saveQueue.pending.count)") }
+            // 변환 중이면 진행률, 아니면 분류 안 됨 개수(0이면 숫자 없음)
+            if !recorder.isRecording, let percent = conversion.percent {
+                Text("\(percent)%")
+            } else if !saveQueue.pending.isEmpty {
+                Text("\(saveQueue.pending.count)")
+            }
         }
     }
 
@@ -113,6 +125,7 @@ struct EarShotApp: App {
 
     private var labelSymbol: String {
         if recorder.isRecording { return Self.recordingSymbol }
+        if !conversion.items.isEmpty { return "hourglass" }
         return monitor.inputApps.contains(where: \.isMeeting) ? "ear.fill" : "ear"
     }
 }

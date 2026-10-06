@@ -9,10 +9,10 @@
 <p align="center"><img src="docs/demo.gif" width="720" alt="EarShot demo: menu, save window and category settings"></p>
 
 EarShot records meetings you join on your Mac — Slack huddles, Zoom, Google Meet and so on — capturing **both the other people (app audio) and you (microphone)**.
-When you stop, it asks for a topic and attendees, then moves the recording into one of your categories (for example a work folder or a NAS share), where you can transcribe or archive it however you like.
+When you stop, it converts the recording (with a progress readout in the menu bar) and sends a notification. Click it whenever you are ready to add a topic and attendees, and EarShot moves the recording into one of your categories (for example a work folder or a NAS share), where you can transcribe or archive it however you like.
 
 ```
-⌃⌥R  ──▶  recording  ──▶  ⌃⌥R  ──▶  save window (date · topic · attendees)  ──▶  [Work] / [Personal] / …  ──▶  your folder
+⌃⌥R  ──▶  recording  ──▶  ⌃⌥R  ──▶  converting 37%  ──▶  notification  ──▶  save window (date · topic · attendees)  ──▶  [Work] / [Personal] / …  ──▶  your folder
 ```
 
 > [!IMPORTANT]
@@ -30,7 +30,8 @@ When you stop, it asks for a topic and attendees, then moves the recording into 
 | 📊 **Level meters** | Mac audio and microphone levels in the menu while recording. Notifies you if one side stays silent for 15 seconds |
 | 🔌 **Survives device changes** | Switching earphones or Bluetooth splits the recording into pieces and joins them at the end |
 | 🛟 **Crash recovery** | If the app dies mid-recording, the leftover pieces are saved on the next launch |
-| 🗂️ **Save window** | Date and time (prefilled with the start time), topic, attendees → pick a category. "Later" keeps it in the "Unsorted" menu |
+| ⏳ **Conversion progress** | After you stop, the menu bar shows the conversion progress (a two-hour meeting takes about 40 seconds) |
+| 🗂️ **Save when you are ready** | No window pops up over your screen after a meeting — you get a notification instead. Click it (or pick the recording from the "Unsorted" menu) to open the save window: date and time (prefilled with the start time), topic, attendees → pick a category. "Later" keeps it in "Unsorted" |
 | 🏷️ **Your own categories** | Rename, add (up to 6) or remove categories and choose a folder for each in Settings |
 | 📤 **Reliable delivery** | If a folder is unavailable (e.g. a NAS volume isn't mounted), files wait in an outbox and are retried every 60 seconds and whenever a volume mounts. A file that fails 5 times for the same reason is moved aside to "Failed to Send" |
 | 🚀 **Launch at login** | Starts with your Mac and restarts if it crashes (quitting from the menu keeps it off) |
