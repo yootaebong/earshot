@@ -150,6 +150,21 @@ final class RecordingController: ObservableObject {
         Task { await start(app, source: source) }
     }
 
+    /// 자동 녹음이 부른다. 시작한 녹음의 시작 시각, 이미 녹음 중·시작 중이거나 실패하면 nil.
+    /// "회의 앱 소리"면 그 앱을, 아니면 설정대로 녹음한다. 시작하는 동안은 isStarting 이 ⌃⌥R 을 막는다.
+    func startAutomatically(for app: MeetingApp) async -> Date? {
+        guard session == nil, !isStarting else { return nil }
+        isStarting = true
+        let source = AudioSettings.shared.source
+        await start(source == .meetingApp ? app : nil, source: source)
+        return current?.startedAt
+    }
+
+    /// 녹음 중이면 멈춘다(자동 녹음 종료용 — toggle 과 달리 시작하지 않는다).
+    func stop() {
+        if session != nil { finish() }
+    }
+
     private func tick() {
         if let current {
             let seconds = Int(Date().timeIntervalSince(current.startedAt))

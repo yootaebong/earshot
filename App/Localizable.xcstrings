@@ -894,6 +894,182 @@
           }
         }
       }
+    },
+    "자동 녹음 시작 — %@ · ⌃⌥R 로 멈춤": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto recording started — %@ · press ⌃⌥R to stop"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 녹음 시작 — %@ · ⌃⌥R 로 멈춤"
+          }
+        }
+      }
+    },
+    "자동 녹음 대기 — 감지된 회의 앱 없음": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto record on — no meeting app detected"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 녹음 대기 — 감지된 회의 앱 없음"
+          }
+        }
+      }
+    },
+    "%@ 감지 — 곧 자동 녹음": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ detected — recording shortly"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 감지 — 곧 자동 녹음"
+          }
+        }
+      }
+    },
+    "자동 녹음 중: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto recording: %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 녹음 중: %@"
+          }
+        }
+      }
+    },
+    "%@ — 이번 회의는 자동 녹음 안 함": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ — not auto recording this meeting"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ — 이번 회의는 자동 녹음 안 함"
+          }
+        }
+      }
+    },
+    "직접 녹음 중 — 자동 녹음 쉼": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording manually — auto record paused"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "직접 녹음 중 — 자동 녹음 쉼"
+          }
+        }
+      }
+    },
+    "지금 마이크 쓰는 앱": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apps using the microphone"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지금 마이크 쓰는 앱"
+          }
+        }
+      }
+    },
+    "%@%@ — 자동 녹음 대상": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@%@ — auto record target"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@%@ — 자동 녹음 대상"
+          }
+        }
+      }
+    },
+    "자동 녹음": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto Record"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 녹음"
+          }
+        }
+      }
+    },
+    "회의 앱이 마이크를 쓰면 자동 녹음": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Record Automatically When a Meeting App Uses the Mic"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "회의 앱이 마이크를 쓰면 자동 녹음"
+          }
+        }
+      }
+    },
+    "대상 앱": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apps"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "대상 앱"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

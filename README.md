@@ -25,6 +25,7 @@ When you stop, it converts the recording (with a progress readout in the menu ba
 |---|---|
 | 🎙️ **Manual recording** | `⌃⌥R` (control + option + R) or "Start Recording" in the menu. Works whichever app is in front |
 | 🔊 **Two sources, one file** | Meeting-app audio via a Core Audio process tap, your voice via the microphone. Mixed into a single m4a at the end |
+| 🤖 **Auto record (opt-in)** | Turn on "Auto Record" in the menu and EarShot starts recording when Zoom, Slack, Teams or Webex has used the microphone for 5 seconds, and stops 10 seconds after it lets go. Browsers (Google Meet etc.) can be added. You get a notification when it starts; stopping it with `⌃⌥R` skips the rest of that meeting. Recordings you start yourself are never stopped automatically. Off by default |
 | 🧭 **Meeting app detection** | If a meeting app (Zoom, Slack, Chrome, Safari, Arc, Edge) is using the microphone, only that app is recorded; otherwise the whole Mac |
 | ↔️ **You left, others right** | The saved file puts your microphone on the left channel and the meeting audio on the right, so a transcription tool can tell who spoke. Turn it off under "Audio Source" to get a normal mix. "Microphone only" recordings are not split. Without headphones, the other side leaks into your microphone a little |
 | 🎚️ **Device choice** | "Microphone" menu (system default or a specific device) and "Audio Source" menu (meeting app / entire Mac / microphone only) |

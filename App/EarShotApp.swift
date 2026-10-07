@@ -10,6 +10,8 @@ struct EarShotApp: App {
     @StateObject private var saveQueue: SaveQueue
     @StateObject private var audioSettings = AudioSettings.shared
     @StateObject private var conversion = ConversionStatus.shared
+    @StateObject private var autoRecorder: AutoRecorder
+    @StateObject private var autoSettings = AutoRecordSettings.shared
 
     init() {
         // 로그인 실행(launchd)과 직접 실행이 겹치면 잠금을 못 잡은 쪽이 조용히 물러난다(exit 0 이라 KeepAlive 도 다시 안 띄운다).
@@ -23,7 +25,10 @@ struct EarShotApp: App {
         UNUserNotificationCenter.current().delegate = NotificationRouter.shared
         let monitor = MicMonitor()
         _monitor = StateObject(wrappedValue: monitor)
-        _recorder = StateObject(wrappedValue: RecordingController(monitor: monitor))
+        let recorder = RecordingController(monitor: monitor)
+        _recorder = StateObject(wrappedValue: recorder)
+        let autoRecorder = AutoRecorder(monitor: monitor, recorder: recorder)
+        _autoRecorder = StateObject(wrappedValue: autoRecorder)
         let delivery = Delivery()
         _delivery = StateObject(wrappedValue: delivery)
         _saveQueue = StateObject(wrappedValue: SaveQueue(delivery: delivery))
@@ -43,6 +48,10 @@ struct EarShotApp: App {
 
     var body: some Scene {
         MenuBarExtra {
+            // 자동 녹음 상태(켜져 있을 때만)
+            if let text = autoRecorder.statusText {
+                Text(text)
+            }
             // 메뉴 스타일이라 막대를 글자로 그린다.
             if recorder.isRecording {
                 if recorder.capturesAppSound { Text("맥 소리 \(Self.levelBar(recorder.appLevel))") }
@@ -62,8 +71,13 @@ struct EarShotApp: App {
             if monitor.inputApps.isEmpty {
                 Text("마이크 쓰는 앱 없음")
             } else {
+                Text("지금 마이크 쓰는 앱")
                 ForEach(monitor.inputApps) { app in
-                    Text("\(app.isMeeting ? "● " : "")\(app.appName)  (\(app.appBundleID))")
+                    if autoSettings.isTarget(app) {
+                        Text("\(app.isMeeting ? "● " : "")\(app.appName) — 자동 녹음 대상")
+                    } else {
+                        Text("\(app.isMeeting ? "● " : "")\(app.appName)  (\(app.appBundleID))")
+                    }
                 }
             }
             Divider()
@@ -83,6 +97,14 @@ struct EarShotApp: App {
                 Button("보내지 못한 파일 \(delivery.failedCount)개") { NSWorkspace.shared.open(Delivery.failedURL) }
             }
             Button("저장 위치…") { SettingsWindow.show() }
+            Menu("자동 녹음") {
+                Toggle("회의 앱이 마이크를 쓰면 자동 녹음", isOn: Binding(get: { autoSettings.isEnabled }, set: { autoSettings.setEnabled($0) }))
+                Divider()
+                Text("대상 앱")
+                ForEach(AutoRecordApp.all) { app in
+                    Toggle(app.name, isOn: Binding(get: { autoSettings.appIDs.contains(app.id) }, set: { autoSettings.setApp(app.id, on: $0) }))
+                }
+            }
             Menu("녹음할 소리") {
                 ForEach(CaptureSource.allCases, id: \.self) { source in
                     Toggle(source.title, isOn: Binding(get: { audioSettings.source == source }, set: { _ in audioSettings.setSource(source) }))

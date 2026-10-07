@@ -16,6 +16,9 @@ struct MeetingApp: Identifiable, Hashable {
     static let meetingApps: Set<String> = [
         "us.zoom.xos",
         "com.tinyspeck.slackmacgap",
+        "com.microsoft.teams2",
+        "com.microsoft.teams",
+        "Cisco-Systems.Spark",
         "com.google.Chrome",
         "com.apple.Safari",
         "company.thebrowser.Browser",
