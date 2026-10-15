@@ -73,6 +73,56 @@ final class SaveQueue: ObservableObject {
         }
     }
 
+    /// 분류 안 된 녹음을 휴지통으로 옮긴다(옆의 .json 도). 휴지통에서 되살릴 수 있다.
+    func trash(_ urls: [URL]) {
+        var failed: [String] = []
+        for url in urls where pending.contains(url) {
+            do {
+                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            } catch {
+                MicMonitor.log("오류 휴지통으로 옮기기 \(url.lastPathComponent): \(error.localizedDescription)")
+                failed.append(url.lastPathComponent)
+                continue
+            }
+            // 메타만 남으면 같은 시각 녹음 이름이 -2 로 밀린다 — 휴지통이 안 되면 그냥 지운다.
+            let json = RecordingMeta.jsonURL(for: url)
+            if FileManager.default.fileExists(atPath: json.path) {
+                do {
+                    try FileManager.default.trashItem(at: json, resultingItemURL: nil)
+                } catch {
+                    do { try FileManager.default.removeItem(at: json) } catch { MicMonitor.log("오류 메타 지우기 \(json.lastPathComponent): \(error.localizedDescription)") }
+                }
+            }
+            MicMonitor.log("휴지통으로 \(url.lastPathComponent)")
+            waiting.removeAll { $0 == url }
+            NotificationRouter.removeNotification(for: url)
+            if shown == url { panel?.close() }
+        }
+        refresh()
+        if !failed.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = String(localized: "휴지통으로 옮기지 못했어요")
+            alert.informativeText = failed.joined(separator: "\n")
+            NSApp.activate()
+            alert.runModal()
+        }
+    }
+
+    /// 메뉴 "모두 휴지통으로" — 한 번 더 묻는다.
+    func confirmTrashAll() {
+        let urls = pending
+        guard !urls.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "분류 안 된 녹음 \(urls.count)개를 휴지통으로 옮길까요?")
+        alert.informativeText = String(localized: "휴지통에서 되살릴 수 있어요.")
+        alert.addButton(withTitle: String(localized: "휴지통으로 옮기기"))
+        alert.addButton(withTitle: String(localized: "취소"))
+        alert.buttons.first?.hasDestructiveAction = true
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        trash(urls)
+    }
+
     private func showNext() {
         refresh()
         while let next = waiting.first {
@@ -90,7 +140,8 @@ final class SaveQueue: ObservableObject {
                             onSave: { [weak self] category, date, topic, attendees in
                                 self?.save(url, meta: meta, category: category, date: date, topic: topic, attendees: attendees)
                             },
-                            onLater: { [weak self] in self?.panel?.close() })
+                            onLater: { [weak self] in self?.panel?.close() },
+                            onTrash: { [weak self] in self?.trash([url]) })
         let panel = panel ?? makePanel()
         self.panel = panel
         shown = url
@@ -139,18 +190,22 @@ struct SaveForm: View {
     let fileName: String
     let onSave: (Category, Date, String, String) -> Void
     let onLater: () -> Void
+    let onTrash: () -> Void
 
     @ObservedObject private var settings = StorageSettings.shared
     @State private var date: Date
     @State private var topic = ""
     @State private var attendees = ""
     @FocusState private var topicFocused: Bool
+    @State private var confirmingTrash = false
 
-    init(meta: RecordingMeta, fileName: String, onSave: @escaping (Category, Date, String, String) -> Void, onLater: @escaping () -> Void) {
+    init(meta: RecordingMeta, fileName: String, onSave: @escaping (Category, Date, String, String) -> Void,
+         onLater: @escaping () -> Void, onTrash: @escaping () -> Void) {
         self.meta = meta
         self.fileName = fileName
         self.onSave = onSave
         self.onLater = onLater
+        self.onTrash = onTrash
         _date = State(initialValue: meta.startedAt)
     }
 
@@ -167,6 +222,8 @@ struct SaveForm: View {
             HStack {
                 Button("나중에", action: onLater)
                     .keyboardShortcut(.cancelAction)
+                // 필요 없는 녹음(시험·잘못 켠 것)을 지운다. 휴지통으로 옮기니 되살릴 수 있다.
+                Button("삭제…") { confirmingTrash = true }
                 Spacer()
                 // 분류 버튼은 설정의 목록 순서대로
                 ForEach(settings.categories) { category in
@@ -177,6 +234,12 @@ struct SaveForm: View {
         }
         .padding(20)
         .frame(minWidth: 380)
+        .confirmationDialog("이 녹음을 휴지통으로 옮길까요?", isPresented: $confirmingTrash) {
+            Button("휴지통으로 옮기기", role: .destructive, action: onTrash)
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("휴지통에서 되살릴 수 있어요.")
+        }
         .onAppear { topicFocused = true }
     }
 
@@ -243,6 +306,15 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let request = response.notification.request
+        // 새 버전 알림은 누르면 DMG 를 받는다.
+        if let link = request.content.userInfo[UpdateChecker.downloadKey] as? String, let url = URL(string: link), url.scheme == "https" {
+            MicMonitor.log("알림 누름 업데이트 \(link)")
+            Task { @MainActor in
+                NSWorkspace.shared.open(url)
+                completionHandler()
+            }
+            return
+        }
         // 무음 경고 같은 다른 알림은 url 이 없다.
         let path = request.content.userInfo[Self.urlKey] as? String
         MicMonitor.log("알림 누름 \(path ?? "-") id=\(request.identifier) title=\(request.content.title)")

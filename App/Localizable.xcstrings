@@ -1070,6 +1070,310 @@
           }
         }
       }
+    },
+    "삭제…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "삭제…"
+          }
+        }
+      }
+    },
+    "이 녹음을 휴지통으로 옮길까요?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move this recording to the Trash?"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 녹음을 휴지통으로 옮길까요?"
+          }
+        }
+      }
+    },
+    "휴지통으로 옮기기": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to Trash"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "휴지통으로 옮기기"
+          }
+        }
+      }
+    },
+    "취소": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "취소"
+          }
+        }
+      }
+    },
+    "휴지통에서 되살릴 수 있어요.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can restore it from the Trash."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "휴지통에서 되살릴 수 있어요."
+          }
+        }
+      }
+    },
+    "모두 휴지통으로 옮기기…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move All to Trash…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "모두 휴지통으로 옮기기…"
+          }
+        }
+      }
+    },
+    "분류 안 된 녹음 %lld개를 휴지통으로 옮길까요?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move %lld unsorted recordings to the Trash?"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "분류 안 된 녹음 %lld개를 휴지통으로 옮길까요?"
+          }
+        }
+      }
+    },
+    "휴지통으로 옮기지 못했어요": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't move to the Trash"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "휴지통으로 옮기지 못했어요"
+          }
+        }
+      }
+    },
+    "새 버전 %@ 받기…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download Version %@…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새 버전 %@ 받기…"
+          }
+        }
+      }
+    },
+    "업데이트 확인…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check for Updates…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "업데이트 확인…"
+          }
+        }
+      }
+    },
+    "업데이트를 확인하지 못했어요": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't check for updates"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "업데이트를 확인하지 못했어요"
+          }
+        }
+      }
+    },
+    "인터넷 연결을 확인하고 다시 시도해 주세요.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check your internet connection and try again."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "인터넷 연결을 확인하고 다시 시도해 주세요."
+          }
+        }
+      }
+    },
+    "최신 버전이에요": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You're up to date"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "최신 버전이에요"
+          }
+        }
+      }
+    },
+    "EarShot %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EarShot %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EarShot %@"
+          }
+        }
+      }
+    },
+    "새 버전 %@이 있어요": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version %@ is available"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "새 버전 %@이 있어요"
+          }
+        }
+      }
+    },
+    "DMG 를 받아 열고 EarShot 을 Applications 로 끌어 덮어쓰세요. 지금은 %@이에요.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download the DMG, open it and drag EarShot into Applications to replace it. You have %@."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DMG 를 받아 열고 EarShot 을 Applications 로 끌어 덮어쓰세요. 지금은 %@이에요."
+          }
+        }
+      }
+    },
+    "받기": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "받기"
+          }
+        }
+      }
+    },
+    "EarShot %@이 나왔어요": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EarShot %@ is available"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EarShot %@이 나왔어요"
+          }
+        }
+      }
+    },
+    "눌러서 받기 · 지금은 %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click to download · you have %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "눌러서 받기 · 지금은 %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

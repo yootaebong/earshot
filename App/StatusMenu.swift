@@ -15,6 +15,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let audioSettings = AudioSettings.shared
     private let autoSettings = AutoRecordSettings.shared
     private let conversion = ConversionStatus.shared
+    private let updates = UpdateChecker()
 
     private var statusItem: NSStatusItem?
     private let menu = NSMenu()
@@ -66,6 +67,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             autoRecorder.objectWillChange.map { _ in }.eraseToAnyPublisher(),
             audioSettings.objectWillChange.map { _ in }.eraseToAnyPublisher(),
             autoSettings.objectWillChange.map { _ in }.eraseToAnyPublisher(),
+            updates.objectWillChange.map { _ in }.eraseToAnyPublisher(),
         ]
         Publishers.MergeMany(structural)
             .sink { [weak self] in self?.schedule(structure: true) }
@@ -74,6 +76,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             .sink { [weak self] in self?.schedule(structure: false) }
             .store(in: &cancellables)
         updateLabel()
+        updates.start()
     }
 
     // MARK: - 갱신
@@ -159,6 +162,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var currentStructure: [String] {
         var parts = [
             autoRecorder.statusText ?? "",
+            updates.available?.version ?? "",
             "\(recorder.current?.appName ?? "-") \(recorder.isRecording) \(recorder.capturesAppSound)",
             "\(saveQueue.pending) \(delivery.waitingCount) \(delivery.failedCount) \(loginItem.isEnabled)",
             "\(autoSettings.isEnabled) \(autoSettings.appIDs.sorted())",
@@ -177,6 +181,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         elapsedItem = nil
         conversionItems = [:]
 
+        if let release = updates.available {
+            menu.addItem(ActionItem(String(localized: "새 버전 \(release.version) 받기…")) { [weak self] in self?.updates.download() })
+            menu.addItem(.separator())
+        }
         // 자동 녹음 상태(켜져 있을 때만)
         if let text = autoRecorder.statusText {
             menu.addItem(Self.label(text))
@@ -231,6 +239,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             for url in saveQueue.pending {
                 submenu.addItem(ActionItem(url.deletingPathExtension().lastPathComponent) { [weak self] in self?.saveQueue.open(url) })
             }
+            submenu.addItem(.separator())
+            submenu.addItem(ActionItem(String(localized: "모두 휴지통으로 옮기기…")) { [weak self] in self?.saveQueue.confirmTrashAll() })
             menu.addItem(Self.submenu(String(localized: "분류 안 됨 \(saveQueue.pending.count)개"), submenu))
         }
         // 고르면 그 폴더를 Finder 로 연다(손으로 옮기거나 지울 수 있게).
@@ -282,6 +292,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         let login = loginItem.isEnabled
         menu.addItem(ActionItem(String(localized: "로그인 시 실행"), isOn: login) { [weak self] in self?.loginItem.setEnabled(!login) })
+        menu.addItem(ActionItem(String(localized: "업데이트 확인…")) { [weak self] in self?.updates.checkFromMenu() })
         menu.addItem(ActionItem(String(localized: "감지 로그 열기")) { NSWorkspace.shared.open(MicMonitor.logURL) })
         // 정상 종료(0)라 LaunchAgent 가 다시 켜지 않는다.
         menu.addItem(ActionItem(String(localized: "종료")) { NSApp.terminate(nil) })
