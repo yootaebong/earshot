@@ -10,11 +10,8 @@ import UserNotifications
 final class RecordingController: ObservableObject {
     /// 녹음 대상 이름과 시작 시각
     @Published private(set) var current: (appName: String, startedAt: Date)?
-    /// 메뉴에 보일 "mm:ss". 1초마다 갱신
-    @Published private(set) var elapsedText = ""
-    /// 녹음 중 맥 소리·마이크 크기(0~1, -60dB 가 0). 0.25초마다 갱신
-    @Published private(set) var appLevel: Double = 0
-    @Published private(set) var micLevel: Double = 0
+    /// 경과 시간·소리 크기. 자주 바뀌어서 따로 둔다 — 여기 @Published 로 두면 메뉴를 통째로 다시 만든다.
+    let live = RecordingLive()
     /// 이번 녹음이 맥 소리를 받는지(마이크만이면 false)
     @Published private(set) var capturesAppSound = false
 
@@ -168,7 +165,7 @@ final class RecordingController: ObservableObject {
     private func tick() {
         if let current {
             let seconds = Int(Date().timeIntervalSince(current.startedAt))
-            elapsedText = String(format: "%02d:%02d", seconds / 60, seconds % 60)
+            live.elapsedText = String(format: "%02d:%02d", seconds / 60, seconds % 60)
         }
     }
 
@@ -211,14 +208,14 @@ final class RecordingController: ObservableObject {
     private func stopLevelTimer() {
         levelTimer?.invalidate()
         levelTimer = nil
-        appLevel = 0
-        micLevel = 0
+        live.appLevel = 0
+        live.micLevel = 0
     }
 
     private func updateLevels() {
         guard var session else { return }
-        appLevel = Self.normalized(appMeter.takeRecent())
-        micLevel = Self.normalized(micMeter.takeRecent())
+        live.appLevel = Self.normalized(appMeter.takeRecent())
+        live.micLevel = Self.normalized(micMeter.takeRecent())
         guard !session.silenceChecked, Date().timeIntervalSince(session.startedAt) >= Self.silenceCheckDelay else { return }
         session.silenceChecked = true
         self.session = session
@@ -382,7 +379,7 @@ final class RecordingController: ObservableObject {
         session = Session(app: app, source: source, name: name, startedAt: startedAt, directory: directory, micGranted: micGranted,
                           finished: [], segment: segment, knownObjectIDs: Set(app?.objectIDs ?? []))
         current = (name, startedAt)
-        elapsedText = "00:00"
+        live.elapsedText = "00:00"
         capturesAppSound = source != .micOnly
         startLevelTimer()
         let target = source == .micOnly ? "마이크만" : app.map { "[\($0.appBundleID)] 객체=\($0.objectIDs.count)" } ?? "시스템 전체"
@@ -442,7 +439,7 @@ final class RecordingController: ObservableObject {
         retryingDirectory = nil
         writeFailureTimes = []
         current = nil
-        elapsedText = ""
+        live.elapsedText = ""
         capturesAppSound = false
         stopLevelTimer()
 
@@ -764,6 +761,16 @@ extension RecordingController {
             }
         }
     }
+}
+
+/// 녹음 중 메뉴의 경과 시간과 소리 크기. 메뉴(StatusMenu)는 이것이 바뀌면 그 줄 글자만 고친다.
+@MainActor
+final class RecordingLive: ObservableObject {
+    /// 메뉴에 보일 "mm:ss". 1초마다 갱신
+    @Published var elapsedText = ""
+    /// 맥 소리·마이크 크기(0~1, -60dB 가 0). 0.25초마다 갱신
+    @Published var appLevel: Double = 0
+    @Published var micLevel: Double = 0
 }
 
 /// 녹음을 m4a 로 바꾸는 중인 것들. 메뉴와 메뉴 막대 아이콘이 본다.
