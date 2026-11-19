@@ -1375,22 +1375,6 @@
         }
       }
     },
-    "받아쓰기": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Transcribe"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "받아쓰기"
-          }
-        }
-      }
-    },
     "받아쓸 대기 파일이 있어 지울 수 없어요": {
       "localizations": {
         "en": {
@@ -1439,18 +1423,50 @@
         }
       }
     },
-    "상대 이름": {
+    "받아쓰기 설정": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Other side's name"
+            "value": "Transcription Settings"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "상대 이름"
+            "value": "받아쓰기 설정"
+          }
+        }
+      }
+    },
+    "받아쓰기 설정…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transcription Settings…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "받아쓰기 설정…"
+          }
+        }
+      }
+    },
+    "상대 이름은 저장 창에 적은 참석자로 써요(비우면 \"상대\")": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The other side is named after the attendees you enter when saving (or \"Other\" if empty)"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "상대 이름은 저장 창에 적은 참석자로 써요(비우면 \"상대\")"
           }
         }
       }

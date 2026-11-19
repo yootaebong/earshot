@@ -137,13 +137,11 @@ final class StorageSettings: ObservableObject {
 /// 메뉴 "저장 위치…" 창
 struct StorageSettingsView: View {
     @ObservedObject var settings: StorageSettings
-    @ObservedObject var transcription = TranscriptionSettings.shared
-    @ObservedObject var models = ModelStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(settings.categories) { category in
-                CategoryRow(category: category, settings: settings, transcription: transcription, models: models)
+                CategoryRow(category: category, settings: settings)
             }
             HStack {
                 Spacer()
@@ -152,29 +150,23 @@ struct StorageSettingsView: View {
                     .help(settings.categories.count >= StorageSettings.maxCount
                           ? String(localized: "분류는 최대 \(StorageSettings.maxCount)개까지예요") : "")
             }
-            Divider()
-            TranscriptionSection(transcription: transcription, models: models)
         }
         .padding(20)
         .frame(width: 640)
     }
 }
 
-/// 분류 한 줄: [이름][경로][받아쓰기][바꾸기][삭제]
+/// 분류 한 줄: [이름][경로][바꾸기][삭제]
 private struct CategoryRow: View {
     let category: Category
     @ObservedObject var settings: StorageSettings
-    @ObservedObject var transcription: TranscriptionSettings
-    @ObservedObject var models: ModelStore
 
     @State private var draft: String
     @FocusState private var nameFocused: Bool
 
-    init(category: Category, settings: StorageSettings, transcription: TranscriptionSettings, models: ModelStore) {
+    init(category: Category, settings: StorageSettings) {
         self.category = category
         self.settings = settings
-        self.transcription = transcription
-        self.models = models
         _draft = State(initialValue: category.name)
     }
 
@@ -192,13 +184,6 @@ private struct CategoryRow: View {
                 .truncationMode(.middle)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            // 켰는데 모델이 없으면 바로 내려받는다.
-            Toggle("받아쓰기", isOn: Binding(
-                get: { transcription.transcribes(category.id) },
-                set: { on in
-                    transcription.setTranscribes(on, for: category.id)
-                    if on { models.downloadIfNeeded() }
-                }))
             Button("바꾸기") { settings.choose(for: category.id) }
             Button("삭제") { settings.remove(category.id) }
                 .disabled(deleteBlockedReason != nil)
@@ -220,25 +205,36 @@ private struct CategoryRow: View {
     }
 }
 
-/// 설정 창 아래 "받아쓰기" 구역: 모델 상태, 화자 이름, 언어
-private struct TranscriptionSection: View {
-    @ObservedObject var transcription: TranscriptionSettings
-    @ObservedObject var models: ModelStore
+/// 메뉴 "받아쓰기 설정…" 창: 받아쓸 분류, 모델 상태, 내 이름, 언어
+struct TranscriptionSettingsView: View {
+    @ObservedObject var storage = StorageSettings.shared
+    @ObservedObject var transcription = TranscriptionSettings.shared
+    @ObservedObject var models = ModelStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("받아쓰기").font(.headline)
             Text("켠 분류의 녹음은 이 맥에서 받아써 같은 폴더에 .md 로 보내요")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            // 켰는데 모델이 없으면 바로 내려받는다.
+            ForEach(storage.categories) { category in
+                Toggle(category.name, isOn: Binding(
+                    get: { transcription.transcribes(category.id) },
+                    set: { on in
+                        transcription.setTranscribes(on, for: category.id)
+                        if on { models.downloadIfNeeded() }
+                    }))
+            }
+            Divider()
             modelRow
             HStack {
                 Text("내 이름")
                 SpeakerNameField(value: transcription.speakerMe) { transcription.setSpeakerMe($0) }
-                Text("상대 이름")
-                SpeakerNameField(value: transcription.speakerOther) { transcription.setSpeakerOther($0) }
                 Spacer()
             }
+            Text("상대 이름은 저장 창에 적은 참석자로 써요(비우면 \"상대\")")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             Picker("언어", selection: Binding(get: { transcription.language }, set: { transcription.setLanguage($0) })) {
                 ForEach(TranscriptionSettings.languages, id: \.self) { code in
                     Text(verbatim: TranscriptionSettings.languageName(code)).tag(code)
@@ -246,6 +242,8 @@ private struct TranscriptionSection: View {
             }
             .fixedSize()
         }
+        .padding(20)
+        .frame(width: 480, alignment: .leading)
     }
 
     @ViewBuilder private var modelRow: some View {
@@ -323,20 +321,16 @@ final class TranscriptionSettings: ObservableObject {
 
     nonisolated private static let categoryIDsKey = "transcribeCategoryIDs"
     nonisolated private static let meKey = "speakerNameMe"
-    nonisolated private static let otherKey = "speakerNameOther"
     nonisolated private static let languageKey = "transcribeLanguage"
 
     /// 받아쓰기를 켠 분류 id
     @Published private(set) var categoryIDs: Set<Category.ID>
     @Published private(set) var speakerMe: String
-    @Published private(set) var speakerOther: String
     @Published private(set) var language: String
 
     private init() {
         categoryIDs = Self.transcribedCategoryIDs
-        let names = Self.speakerNames
-        speakerMe = names.me
-        speakerOther = names.other
+        speakerMe = Self.speakerMe
         language = Self.languageCode
     }
 
@@ -345,10 +339,8 @@ final class TranscriptionSettings: ObservableObject {
         Set(UserDefaults.standard.stringArray(forKey: categoryIDsKey) ?? [])
     }
 
-    nonisolated static var speakerNames: (me: String, other: String) {
-        let defaults = UserDefaults.standard
-        return (defaults.string(forKey: meKey) ?? String(localized: "나"),
-                defaults.string(forKey: otherKey) ?? String(localized: "상대"))
+    nonisolated static var speakerMe: String {
+        UserDefaults.standard.string(forKey: meKey) ?? String(localized: "나")
     }
 
     nonisolated static var languageCode: String {
@@ -380,12 +372,6 @@ final class TranscriptionSettings: ObservableObject {
         speakerMe = name
     }
 
-    func setSpeakerOther(_ name: String) {
-        guard let name = Self.cleanName(name), name != speakerOther else { return }
-        UserDefaults.standard.set(name, forKey: Self.otherKey)
-        speakerOther = name
-    }
-
     func setLanguage(_ code: String) {
         guard Self.languages.contains(code), code != language else { return }
         UserDefaults.standard.set(code, forKey: Self.languageKey)
@@ -406,17 +392,33 @@ enum SettingsWindow {
     private static var window: NSWindow?
 
     static func show() {
-        let window = window ?? {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: StorageSettingsView(settings: .shared)))
-            window.title = String(localized: "저장 위치")
+        window = present(window) { NSHostingController(rootView: StorageSettingsView(settings: .shared)) }
+        window?.title = String(localized: "저장 위치")
+    }
+
+    /// 있으면 앞으로, 없으면 만들어 띄운다.
+    static func present(_ existing: NSWindow?, content: () -> NSViewController) -> NSWindow {
+        let window = existing ?? {
+            let window = NSWindow(contentViewController: content())
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
             window.center()
             return window
         }()
-        self.window = window
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+        return window
+    }
+}
+
+/// 받아쓰기 설정 창 하나를 재사용한다.
+@MainActor
+enum TranscriptionSettingsWindow {
+    private static var window: NSWindow?
+
+    static func show() {
+        window = SettingsWindow.present(window) { NSHostingController(rootView: TranscriptionSettingsView()) }
+        window?.title = String(localized: "받아쓰기 설정")
     }
 }
 
