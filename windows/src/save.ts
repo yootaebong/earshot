@@ -71,6 +71,8 @@ async function load(): Promise<void> {
       invoke<PendingItem | null>("current_pending"),
       invoke<Category[]>("get_categories"),
     ]);
+    // 같은 녹음을 다시 읽으면 입력 중인 주제·참석자를 지우지 않는다.
+    const same = current !== null && item !== null && current.id === item.id;
     current = item;
     if (!item) {
       summary.textContent = "저장할 녹음이 없어요";
@@ -78,12 +80,16 @@ async function load(): Promise<void> {
       return;
     }
     summary.textContent = `${item.appName} · ${durationText(item.duration)}`;
+    categoriesBox.replaceChildren(...categories.map(categoryButton));
+    if (same) return;
     dateInput.value = item.localInput;
     topicInput.value = "";
     attendeesInput.value = "";
-    categoriesBox.replaceChildren(...categories.map(categoryButton));
     topicInput.focus();
   } catch (error) {
+    // 이전 녹음의 분류 버튼으로 잘못 저장하지 않게 비운다.
+    current = null;
+    categoriesBox.replaceChildren();
     showError(error);
   }
 }
@@ -129,13 +135,24 @@ async function later(): Promise<void> {
 async function trash(): Promise<void> {
   const item = current;
   if (!item || busy) return;
-  const ok = await confirm("Pending\\Trash 폴더로 옮겨요. 거기서 되살릴 수 있어요.", {
-    title: "이 녹음을 삭제할까요?",
-    kind: "warning",
-    okLabel: "삭제",
-    cancelLabel: "취소",
-  });
-  if (!ok) return;
+  // 확인 창을 기다리는 동안 잠가 두 번 뜨지 않게 한다.
+  busy = true;
+  setDisabled(true);
+  let ok = false;
+  try {
+    ok = await confirm("Pending\\Trash 폴더로 옮겨요. 거기서 되살릴 수 있어요.", {
+      title: "이 녹음을 삭제할까요?",
+      kind: "warning",
+      okLabel: "삭제",
+      cancelLabel: "취소",
+    });
+  } catch (error) {
+    showError(error);
+  } finally {
+    busy = false;
+    setDisabled(false);
+  }
+  if (!ok || current?.id !== item.id) return;
   await run(() => invoke("trash_pending", { id: item.id }));
 }
 

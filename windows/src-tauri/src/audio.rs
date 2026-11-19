@@ -1,14 +1,16 @@
 //! 캡처(마이크 + 출력 loopback) · wav 쓰기 · 스테레오 합치기 · 재시작 복구.
 
 use std::fs::{self, File};
-use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
-use chrono::{Local, NaiveDateTime, SecondsFormat, TimeZone};
+use chrono::{Local, SecondsFormat, TimeZone};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 // f32::from_sample 은 Sample 트레이트 메서드라 같이 가져온다.
 use cpal::{FromSample, Sample, SampleFormat, SizedSample};
@@ -24,9 +26,18 @@ const BITS_PER_SAMPLE: u16 = 16;
 const MIC_FILE: &str = "mic.wav";
 const SYSTEM_FILE: &str = "system.wav";
 const STARTED_FILE: &str = "started.json";
-const PART_SUFFIX: &str = "part";
+const WAV_EXT: &str = "wav";
+const META_EXT: &str = "json";
+const PART_EXT: &str = "wav.part";
+/// 합칠 때 한 번에 읽는 바이트(채널마다)
+const MERGE_BLOCK_BYTES: usize = 64 * 1024;
+/// 무음을 한 번에 쓰는 샘플 수
+const ZERO_BLOCK: usize = 48_000;
 
-#[derive(Clone, Copy)]
+/// wav 쓰기 실패를 알리는 콜백(한 번만 불린다)
+type Alert = Arc<dyn Fn() + Send + Sync>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Source {
     Mic,
     System,
@@ -50,6 +61,7 @@ impl Source {
 
 /// 콜백 한 번 분량(모노, 장치 샘플레이트)
 struct Chunk {
+    /// 첫 샘플이 잡힌 시각
     at: Instant,
     samples: Vec<f32>,
 }
@@ -68,15 +80,22 @@ pub struct Recording {
     started_at: String,
     started: Instant,
     warnings: Vec<String>,
+    /// 열지 못한 쪽
+    missing: Vec<Source>,
     stop_tx: Sender<()>,
     control: JoinHandle<()>,
 }
 
 impl Recording {
     /// 두 스트림 중 하나라도 열리면 시작한다. 둘 다 안 되면 Err.
-    pub fn start() -> Result<Self> {
+    /// on_write_error: wav 쓰기에 실패하면 녹음마다 한 번 불린다(쓰기 스레드에서).
+    pub fn start<F>(on_write_error: F) -> Result<Self>
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
         let now = Local::now();
-        let id = now.format(store::RECORDING_DIR_FORMAT).to_string();
+        // 같은 초에 다시 시작해도 겹치지 않게 랜덤을 붙인다.
+        let id = store::new_recording_id(&now);
         let dir = store::recording_root()?.join(&id);
         fs::create_dir_all(&dir).with_context(|| format!("{} 만들기", dir.display()))?;
         let started_at = now.to_rfc3339_opts(SecondsFormat::Secs, false);
@@ -87,15 +106,26 @@ impl Recording {
 
         let started = Instant::now();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
-        let (ready_tx, ready_rx) = mpsc::channel::<std::result::Result<Vec<String>, String>>();
+        let (ready_tx, ready_rx) = mpsc::channel::<std::result::Result<Vec<(Source, String)>, String>>();
+        let fired = AtomicBool::new(false);
+        let alert: Alert = Arc::new(move || {
+            if !fired.swap(true, Ordering::SeqCst) {
+                on_write_error();
+            }
+        });
         let capture_dir = dir.clone();
         let control = thread::Builder::new()
             .name("earshot-capture".into())
-            .spawn(move || capture(capture_dir, started, ready_tx, stop_rx))?;
+            .spawn(move || capture(capture_dir, started, alert, ready_tx, stop_rx))?;
 
         let failed = match ready_rx.recv() {
-            Ok(Ok(warnings)) => {
-                return Ok(Self { id, dir, started_at, started, warnings, stop_tx, control });
+            Ok(Ok(errors)) => {
+                let missing = errors.iter().map(|(source, _)| *source).collect();
+                let warnings = errors
+                    .into_iter()
+                    .map(|(source, e)| format!("{}: {e}", source.label()))
+                    .collect();
+                return Ok(Self { id, dir, started_at, started, warnings, missing, stop_tx, control });
             }
             Ok(Err(message)) => anyhow!(message),
             Err(_) => anyhow!("캡처 스레드가 멈췄어요"),
@@ -118,11 +148,21 @@ impl Recording {
         &self.warnings
     }
 
+    /// 마이크를 못 열고 시스템 소리만 녹음 중
+    pub fn missing_mic(&self) -> bool {
+        self.missing.contains(&Source::Mic)
+    }
+
+    /// 시스템 소리를 못 열고 마이크만 녹음 중
+    pub fn missing_system(&self) -> bool {
+        self.missing.contains(&Source::System)
+    }
+
     /// 스트림을 닫고 wav 를 마무리한 뒤 합쳐 Pending 으로 보낸다.
     pub fn stop(self) -> Result<Outcome> {
         let _ = self.stop_tx.send(());
         self.control.join().map_err(|_| anyhow!("캡처 스레드 패닉"))?;
-        finalize_dir(&self.dir, &self.id, &self.started_at)
+        finalize_dir(&self.dir, &self.id, &self.started_at, false)
     }
 }
 
@@ -130,7 +170,8 @@ impl Recording {
 fn capture(
     dir: PathBuf,
     started: Instant,
-    ready_tx: Sender<std::result::Result<Vec<String>, String>>,
+    alert: Alert,
+    ready_tx: Sender<std::result::Result<Vec<(Source, String)>, String>>,
     stop_rx: Receiver<()>,
 ) {
     let host = cpal::default_host();
@@ -138,16 +179,18 @@ fn capture(
     let mut writers = Vec::new();
     let mut errors = Vec::new();
     for source in [Source::Mic, Source::System] {
-        match open_source(&host, source, &dir, started) {
+        match open_source(&host, source, &dir, started, alert.clone()) {
             Ok((stream, writer)) => {
                 streams.push(stream);
                 writers.push(writer);
             }
-            Err(e) => errors.push(format!("{}: {e:#}", source.label())),
+            Err(e) => errors.push((source, format!("{e:#}"))),
         }
     }
     if streams.is_empty() {
-        let _ = ready_tx.send(Err(errors.join(" / ")));
+        let text: Vec<String> =
+            errors.iter().map(|(source, e)| format!("{}: {e}", source.label())).collect();
+        let _ = ready_tx.send(Err(text.join(" / ")));
         return;
     }
     let _ = ready_tx.send(Ok(errors));
@@ -167,6 +210,7 @@ fn open_source(
     source: Source,
     dir: &Path,
     started: Instant,
+    alert: Alert,
 ) -> Result<(cpal::Stream, JoinHandle<()>)> {
     let (device, supported) = match source {
         Source::Mic => {
@@ -183,7 +227,8 @@ fn open_source(
     };
     let config: cpal::StreamConfig = supported.config();
     let (tx, rx) = mpsc::channel::<Chunk>();
-    let writer = spawn_writer(dir.join(source.file()), config.sample_rate.0, started, rx, source)?;
+    let writer =
+        spawn_writer(dir.join(source.file()), config.sample_rate.0, started, rx, source, alert)?;
     let stream = match supported.sample_format() {
         SampleFormat::F32 => build_stream::<f32>(&device, &config, tx, source)?,
         SampleFormat::I16 => build_stream::<i16>(&device, &config, tx, source)?,
@@ -210,14 +255,22 @@ where
     let label = source.label();
     let stream = device.build_input_stream(
         config,
-        move |data: &[T], _: &cpal::InputCallbackInfo| {
+        move |data: &[T], info: &cpal::InputCallbackInfo| {
+            // 콜백 시각이 아니라 캡처 시각 기준 — 몰려 들어온 패킷도 제자리에 놓인다.
+            let now = Instant::now();
+            let timestamp = info.timestamp();
+            let at = timestamp
+                .callback
+                .duration_since(&timestamp.capture)
+                .and_then(|delay| now.checked_sub(delay))
+                .unwrap_or(now);
             let samples: Vec<f32> = data
                 .chunks(channels)
                 .map(|frame| {
                     frame.iter().map(|&s| f32::from_sample(s)).sum::<f32>() / frame.len() as f32
                 })
                 .collect();
-            let _ = tx.send(Chunk { at: Instant::now(), samples });
+            let _ = tx.send(Chunk { at, samples });
         },
         move |err| eprintln!("[{label}] 스트림 오류: {err}"),
         None,
@@ -245,6 +298,7 @@ fn spawn_writer(
     started: Instant,
     rx: Receiver<Chunk>,
     source: Source,
+    alert: Alert,
 ) -> Result<JoinHandle<()>> {
     let mut writer = hound::WavWriter::create(&path, mono_spec())
         .with_context(|| format!("{} 만들기", path.display()))?;
@@ -255,44 +309,64 @@ fn spawn_writer(
             let mut resampler = Resampler::new(in_rate, SAMPLE_RATE);
             let mut written: u64 = 0;
             let mut out = Vec::new();
+            let mut block = Vec::new();
             for chunk in rx {
                 out.clear();
                 resampler.process(&chunk.samples, &mut out);
-                // loopback 은 무음이면 콜백이 안 온다 → 시작 후 경과시간 기준으로 밀린 만큼 0 을 먼저 채운다.
-                // 이번 덩어리는 "지금" 끝난 소리라 그 길이만큼은 빼고 채운다.
+                // loopback 은 무음이면 콜백이 안 온다 → 이 덩어리가 시작했어야 할 자리까지 0 을 먼저 채운다.
+                // chunk.at 은 첫 샘플의 캡처 시각이다.
                 let expected =
                     (chunk.at.saturating_duration_since(started).as_secs_f64() * f64::from(SAMPLE_RATE)) as u64;
                 let behind = expected.saturating_sub(written);
-                let zeros = if behind > GAP_THRESHOLD {
-                    behind.saturating_sub(out.len() as u64)
-                } else {
-                    0
-                };
-                if let Err(e) = write_samples(&mut writer, zeros, &out) {
+                let zeros = if behind > GAP_THRESHOLD { behind } else { 0 };
+                if let Err(e) = write_samples(&mut writer, zeros, &out, &mut block) {
                     eprintln!("[{label}] 쓰기 실패: {e}");
+                    alert();
                     break;
                 }
                 written += zeros + out.len() as u64;
             }
             if let Err(e) = writer.finalize() {
                 eprintln!("[{label}] wav 마무리 실패: {e}");
+                alert();
             }
         })?;
     Ok(handle)
 }
 
+/// 무음 zeros 개를 쓰고 samples 를 쓴다. block 은 재사용 버퍼.
 fn write_samples<W: Write + Seek>(
     writer: &mut hound::WavWriter<W>,
     zeros: u64,
     samples: &[f32],
+    block: &mut Vec<i16>,
 ) -> std::result::Result<(), hound::Error> {
-    for _ in 0..zeros {
-        writer.write_sample(0i16)?;
+    let mut left = zeros;
+    while left > 0 {
+        let n = left.min(ZERO_BLOCK as u64) as usize;
+        block.clear();
+        block.resize(n, 0);
+        write_block(writer, block)?;
+        left -= n as u64;
     }
+    block.clear();
+    block.extend(samples.iter().map(|&s| to_i16(s)));
+    write_block(writer, block)
+}
+
+/// 버퍼 단위로 쓴다(샘플마다 write_sample 보다 빠름).
+fn write_block<W: Write + Seek>(
+    writer: &mut hound::WavWriter<W>,
+    samples: &[i16],
+) -> std::result::Result<(), hound::Error> {
+    if samples.is_empty() {
+        return Ok(());
+    }
+    let mut sample_writer = writer.get_i16_writer(samples.len() as u32);
     for &sample in samples {
-        writer.write_sample(to_i16(sample))?;
+        sample_writer.write_sample(sample);
     }
-    Ok(())
+    sample_writer.flush()
 }
 
 fn to_i16(sample: f32) -> i16 {
@@ -338,7 +412,8 @@ impl Resampler {
 /// 16비트 PCM wav 의 data 부분을 끝까지 읽는다.
 /// 앱이 죽어 hound 가 헤더를 마무리 못 한 파일(data 크기 0)도 읽도록 선언 크기 대신 파일 끝까지 본다.
 struct PcmReader {
-    inner: BufReader<File>,
+    inner: File,
+    /// 남은 샘플 수
     remaining: u64,
 }
 
@@ -358,7 +433,7 @@ impl PcmReader {
             pos += 8;
             if &chunk[0..4] == b"data" {
                 let remaining = len.saturating_sub(pos) / 2;
-                return Ok(Self { inner: BufReader::new(file), remaining });
+                return Ok(Self { inner: file, remaining });
             }
             let size = u64::from(u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]));
             pos += size + (size & 1);
@@ -369,43 +444,71 @@ impl PcmReader {
     fn len(&self) -> u64 {
         self.remaining
     }
-}
 
-impl Iterator for PcmReader {
-    type Item = i16;
-
-    fn next(&mut self) -> Option<i16> {
-        if self.remaining == 0 {
-            return None;
+    /// bytes 크기만큼(남은 만큼) 읽어 out 에 담는다. 끝이면 out 이 빈다.
+    /// 다 못 채우면 파일이 짧은 것이라 그 덩어리를 마지막으로 본다.
+    fn read_block(&mut self, bytes: &mut [u8], out: &mut Vec<i16>) -> Result<()> {
+        out.clear();
+        let want = (self.remaining.saturating_mul(2)).min(bytes.len() as u64) as usize;
+        if want == 0 {
+            return Ok(());
         }
-        let mut bytes = [0u8; 2];
-        self.inner.read_exact(&mut bytes).ok()?;
-        self.remaining -= 1;
-        Some(i16::from_le_bytes(bytes))
+        let mut filled = 0;
+        while filled < want {
+            match self.inner.read(&mut bytes[filled..want]) {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        let samples = filled / 2;
+        self.remaining = if filled < want { 0 } else { self.remaining - samples as u64 };
+        out.extend(bytes[..samples * 2].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])));
+        Ok(())
     }
 }
 
-/// 왼쪽 마이크, 오른쪽 시스템. 짧은 쪽은 0.
-fn merge(mic: Option<PcmReader>, system: Option<PcmReader>, out: &Path) -> Result<()> {
+fn read_side(reader: &mut Option<PcmReader>, bytes: &mut [u8], out: &mut Vec<i16>) -> Result<()> {
+    match reader {
+        Some(reader) => reader.read_block(bytes, out),
+        None => {
+            out.clear();
+            Ok(())
+        }
+    }
+}
+
+/// 왼쪽 마이크, 오른쪽 시스템. 짧은 쪽은 0. 64KB 씩 읽어 덩어리로 쓴다.
+fn merge(mut mic: Option<PcmReader>, mut system: Option<PcmReader>, out: &Path) -> Result<()> {
     let mut writer = hound::WavWriter::create(out, stereo_spec())
         .with_context(|| format!("{} 만들기", out.display()))?;
-    let mut left = mic.into_iter().flatten();
-    let mut right = system.into_iter().flatten();
+    let mut bytes = vec![0u8; MERGE_BLOCK_BYTES];
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    let mut frames = Vec::with_capacity(MERGE_BLOCK_BYTES);
     loop {
-        let l = left.next();
-        let r = right.next();
-        if l.is_none() && r.is_none() {
+        // 양쪽 모두 같은 크기로 읽으니 덩어리마다 위치가 맞는다.
+        read_side(&mut mic, &mut bytes, &mut left)?;
+        read_side(&mut system, &mut bytes, &mut right)?;
+        let count = left.len().max(right.len());
+        if count == 0 {
             break;
         }
-        writer.write_sample(l.unwrap_or(0))?;
-        writer.write_sample(r.unwrap_or(0))?;
+        frames.clear();
+        for i in 0..count {
+            frames.push(left.get(i).copied().unwrap_or(0));
+            frames.push(right.get(i).copied().unwrap_or(0));
+        }
+        write_block(&mut writer, &frames)?;
     }
     writer.finalize()?;
     Ok(())
 }
 
 /// 녹음 폴더 하나를 마무리한다. 30초 미만이면 지우고 TooShort.
-fn finalize_dir(dir: &Path, id: &str, started_at: &str) -> Result<Outcome> {
+/// Pending 이름은 id 를 기본으로, 겹치면 "-2" 를 붙인다. wav·json 은 같은 기본 이름.
+fn finalize_dir(dir: &Path, id: &str, started_at: &str, recovering: bool) -> Result<Outcome> {
     // 없거나 못 읽는 쪽(스트림 실패)은 무음으로 본다.
     let mic = PcmReader::open(&dir.join(MIC_FILE)).ok();
     let system = PcmReader::open(&dir.join(SYSTEM_FILE)).ok();
@@ -418,38 +521,60 @@ fn finalize_dir(dir: &Path, id: &str, started_at: &str) -> Result<Outcome> {
 
     let pending = store::pending_root()?;
     fs::create_dir_all(&pending)?;
-    let wav = pending.join(format!("{id}.wav"));
+    let own = |ext: &str| pending.join(format!("{id}.{ext}"));
+    // 지난번 옮긴 뒤 폴더만 못 지우고 죽었으면 이미 끝난 녹음이다(id 에 랜덤이 있어 남의 것일 리 없음).
+    if recovering && own(WAV_EXT).exists() && own(META_EXT).exists() {
+        fs::remove_dir_all(dir).with_context(|| format!("{} 지우기", dir.display()))?;
+        return Ok(Outcome::Saved(id.to_string()));
+    }
+    // 지난번 합치다 죽은 흔적(반쪽 part, wav 없는 json)을 치운다.
+    let _ = fs::remove_file(own(PART_EXT));
+    if !own(WAV_EXT).exists() {
+        let _ = fs::remove_file(own(META_EXT));
+    }
+
+    let stem = store::unique_stem(&pending, id, &[WAV_EXT, META_EXT, PART_EXT]);
+    let wav = pending.join(format!("{stem}.{WAV_EXT}"));
     // 합치다 죽어도 반쪽 파일이 Pending 에 보이지 않게 .part 로 쓰고 옮긴다(다음 실행 때 다시 합침).
-    let part = pending.join(format!("{id}.wav.{PART_SUFFIX}"));
-    merge(mic, system, &part)?;
+    let part = pending.join(format!("{stem}.{PART_EXT}"));
+    if let Err(e) = merge(mic, system, &part) {
+        let _ = fs::remove_file(&part);
+        return Err(e);
+    }
     store::write_meta(
-        &pending.join(format!("{id}.json")),
+        &pending.join(format!("{stem}.{META_EXT}")),
         &Meta { started_at: started_at.to_string(), duration },
     )?;
     fs::rename(&part, &wav).with_context(|| format!("{} 옮기기", wav.display()))?;
     fs::remove_dir_all(dir).with_context(|| format!("{} 지우기", dir.display()))?;
-    Ok(Outcome::Saved(id.to_string()))
+    Ok(Outcome::Saved(stem))
 }
 
-/// 앱 시작 때 Recording 에 남은 녹음을 합쳐 Pending 으로 보낸다. 보낸 id 들을 돌려준다.
-pub fn recover_all() -> Vec<String> {
-    let mut saved = Vec::new();
+/// Recording 에 남은 녹음 폴더 목록. 앱 시작 때 녹음을 시작하기 전에 모은다.
+pub fn leftover_dirs() -> Vec<PathBuf> {
     let Ok(root) = store::recording_root() else {
-        return saved;
+        return Vec::new();
     };
     let Ok(entries) = fs::read_dir(&root) else {
-        return saved;
+        return Vec::new();
     };
-    for entry in entries.flatten() {
-        let dir = entry.path();
-        if !dir.is_dir() {
+    entries.flatten().map(|entry| entry.path()).filter(|path| path.is_dir()).collect()
+}
+
+/// 미리 모은 폴더만 합쳐 Pending 으로 보낸다. is_recording(id) 가 참이면 건너뛴다. 보낸 id 들을 돌려준다.
+pub fn recover(dirs: Vec<PathBuf>, is_recording: impl Fn(&str) -> bool) -> Vec<String> {
+    let mut saved = Vec::new();
+    for dir in dirs {
+        let Some(id) = dir.file_name().map(|name| name.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        if is_recording(&id) || !dir.is_dir() {
             continue;
         }
-        let id = entry.file_name().to_string_lossy().into_owned();
         let started_at = store::read_meta(&dir.join(STARTED_FILE))
             .map(|meta| meta.started_at)
             .unwrap_or_else(|_| started_at_from_id(&id));
-        match finalize_dir(&dir, &id, &started_at) {
+        match finalize_dir(&dir, &id, &started_at, true) {
             Ok(Outcome::Saved(id)) => saved.push(id),
             Ok(Outcome::TooShort) => {}
             Err(e) => eprintln!("복구 실패 {id}: {e:#}"),
@@ -460,8 +585,7 @@ pub fn recover_all() -> Vec<String> {
 
 /// started.json 이 없으면 폴더 이름(시작 시각)으로 대신한다.
 fn started_at_from_id(id: &str) -> String {
-    NaiveDateTime::parse_from_str(id, store::RECORDING_DIR_FORMAT)
-        .ok()
+    store::started_from_id(id)
         .and_then(|naive| Local.from_local_datetime(&naive).single())
         .unwrap_or_else(Local::now)
         .to_rfc3339_opts(SecondsFormat::Secs, false)

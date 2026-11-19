@@ -3,6 +3,7 @@
 mod audio;
 mod store;
 
+use std::collections::VecDeque;
 use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
@@ -30,12 +31,22 @@ const MENU_QUIT: &str = "quit";
 
 const TICK: Duration = Duration::from_secs(1);
 const TOO_SHORT_MESSAGE: &str = "30초보다 짧은 녹음이라 저장하지 않았어요";
+const MIC_MISSING_MESSAGE: &str = "마이크를 열지 못해 시스템 소리만 녹음해요";
+const SYSTEM_MISSING_MESSAGE: &str = "시스템 소리를 열지 못해 마이크만 녹음해요";
+const WRITE_FAILED_MESSAGE: &str = "녹음 저장 실패 — 디스크 공간 확인";
 
 #[derive(Default)]
 struct AppState {
     recording: Mutex<Option<audio::Recording>>,
-    /// 저장 창이 보여 줄 녹음 id
-    current_save: Mutex<Option<String>>,
+    /// 저장 창 상태
+    save: Mutex<SaveQueue>,
+}
+
+/// 저장 창이 보여 주는 녹음과 그 뒤에 기다리는 녹음(맥 SaveWindow 의 waiting 과 같음)
+#[derive(Default)]
+struct SaveQueue {
+    current: Option<String>,
+    waiting: VecDeque<String>,
 }
 
 /// 독(poison)이 나도 안의 값을 그대로 쓴다.
@@ -66,14 +77,26 @@ fn toggle_recording(app: &AppHandle) {
         thread::spawn(move || finish(&app, recording, true));
         return;
     }
-    match audio::Recording::start() {
+    let alert_app = app.clone();
+    let on_write_error = move || notify(&alert_app, store::APP_NAME, WRITE_FAILED_MESSAGE);
+    match audio::Recording::start(on_write_error) {
         Ok(recording) => {
             for warning in recording.warnings() {
                 eprintln!("한쪽 스트림만 녹음: {warning}");
             }
+            let partial = if recording.missing_mic() {
+                Some(MIC_MISSING_MESSAGE)
+            } else if recording.missing_system() {
+                Some(SYSTEM_MISSING_MESSAGE)
+            } else {
+                None
+            };
             let id = recording.id().to_string();
             *guard = Some(recording);
             drop(guard);
+            if let Some(message) = partial {
+                notify(app, store::APP_NAME, message);
+            }
             refresh_tray(app);
             spawn_ticker(app.clone(), id);
         }
@@ -226,23 +249,61 @@ fn open_window(app: &AppHandle, label: &str, page: &str, title: &str, width: f64
     }
 }
 
+fn show_save_window(app: &AppHandle) {
+    open_window(app, SAVE_LABEL, "save.html", "녹음 저장", 480.0, 300.0);
+}
+
 /// id 가 없으면 가장 오래된 분류 안 된 녹음을 연다.
+/// 창이 이미 무언가를 보여 주고 있으면 내용을 바꾸지 않는다 — 새 녹음은 대기열 뒤에 넣는다.
 fn open_save(app: &AppHandle, id: Option<String>) {
+    let window_open = app.get_webview_window(SAVE_LABEL).is_some();
+    let state = app.state::<AppState>();
+    let mut save = lock(&state.save);
+    if window_open && save.current.is_some() {
+        if let Some(id) = id {
+            if save.current.as_deref() != Some(id.as_str()) && !save.waiting.contains(&id) {
+                save.waiting.push_back(id);
+            }
+        } else {
+            drop(save);
+            show_save_window(app);
+        }
+        return;
+    }
     let id = id.or_else(|| store::pending_ids().ok().and_then(|ids| ids.into_iter().next()));
     let Some(id) = id else {
         return;
     };
-    *lock(&app.state::<AppState>().current_save) = Some(id);
-    let existed = app.get_webview_window(SAVE_LABEL).is_some();
-    open_window(app, SAVE_LABEL, "save.html", "녹음 저장", 480.0, 300.0);
-    if existed {
+    save.waiting.retain(|waiting| *waiting != id);
+    save.current = Some(id);
+    drop(save);
+    show_save_window(app);
+    if window_open {
         let _ = app.emit_to(SAVE_LABEL, PENDING_EVENT, ());
     }
 }
 
-fn close_save(app: &AppHandle) {
-    *lock(&app.state::<AppState>().current_save) = None;
-    if let Some(window) = app.get_webview_window(SAVE_LABEL) {
+/// 지금 녹음을 끝냈으니(저장·나중에·삭제) 대기열의 다음 녹음을 보인다. 없으면 창을 닫는다.
+fn advance_save(app: &AppHandle) {
+    let pending = store::pending_ids().unwrap_or_default();
+    let next = {
+        let state = app.state::<AppState>();
+        let mut save = lock(&state.save);
+        let done = save.current.take();
+        let mut next = None;
+        while let Some(id) = save.waiting.pop_front() {
+            // 그사이 다른 곳에서 옮겨졌으면 건너뛴다.
+            if Some(&id) != done.as_ref() && pending.contains(&id) {
+                next = Some(id);
+                break;
+            }
+        }
+        save.current = next.clone();
+        next
+    };
+    if next.is_some() {
+        let _ = app.emit_to(SAVE_LABEL, PENDING_EVENT, ());
+    } else if let Some(window) = app.get_webview_window(SAVE_LABEL) {
         let _ = window.close();
     }
 }
@@ -251,7 +312,7 @@ fn close_save(app: &AppHandle) {
 
 #[tauri::command]
 fn current_pending(state: State<'_, AppState>) -> Result<Option<PendingItem>, String> {
-    let id = lock(&state.current_save).clone();
+    let id = lock(&state.save).current.clone();
     match id {
         Some(id) => store::pending_item(&id).map(Some).map_err(error_text),
         None => Ok(None),
@@ -279,14 +340,14 @@ async fn save_pending(
     attendees: String,
 ) -> Result<String, String> {
     let target = store::classify(&id, &category_id, &date, &topic, &attendees).map_err(error_text)?;
-    close_save(&app);
+    advance_save(&app);
     refresh_tray(&app);
     Ok(target.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
 async fn later_pending(app: AppHandle) -> Result<(), String> {
-    close_save(&app);
+    advance_save(&app);
     refresh_tray(&app);
     Ok(())
 }
@@ -294,7 +355,7 @@ async fn later_pending(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn trash_pending(app: AppHandle, id: String) -> Result<(), String> {
     store::trash(&id).map_err(error_text)?;
-    close_save(&app);
+    advance_save(&app);
     refresh_tray(&app);
     Ok(())
 }
@@ -327,6 +388,8 @@ pub fn run() {
             trash_pending
         ])
         .setup(|app| {
+            // 녹음을 시작할 수 있게 되기(단축키·메뉴) 전에 지난번 녹음 폴더를 먼저 모은다.
+            let leftovers = audio::leftover_dirs();
             let handle = app.handle().clone();
             let icon = app.default_window_icon().cloned().ok_or("기본 아이콘이 없어요")?;
             let menu = build_menu(&handle)?;
@@ -346,7 +409,12 @@ pub fn run() {
 
             // 지난번에 끝내지 못한 녹음을 Pending 으로 보낸다(창은 띄우지 않음).
             thread::spawn(move || {
-                let recovered = audio::recover_all();
+                let recovered = audio::recover(leftovers, |id| {
+                    let state = handle.state::<AppState>();
+                    let guard = lock(&state.recording);
+                    let same = guard.as_ref().is_some_and(|recording| recording.id() == id);
+                    same
+                });
                 if !recovered.is_empty() {
                     eprintln!("복구한 녹음 {}개", recovered.len());
                 }

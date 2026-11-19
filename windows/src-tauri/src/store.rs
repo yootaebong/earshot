@@ -1,7 +1,11 @@
 //! 설정(분류 목록)·Pending 폴더·파일 이름.
 
+use std::collections::hash_map::RandomState;
 use std::fs;
+use std::hash::{BuildHasher, Hasher};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Local, NaiveDateTime};
@@ -12,13 +16,20 @@ pub const APP_NAME: &str = "EarShot";
 pub const GLOBAL_APP_NAME: &str = "전체";
 pub const MIN_CATEGORIES: usize = 1;
 pub const MAX_CATEGORIES: usize = 6;
-/// Recording 아래 녹음 폴더 이름(시작 시각)
+/// Recording 아래 녹음 폴더 이름 앞부분(시작 시각). 뒤에 "-<랜덤 8자>" 가 붙는다.
 pub const RECORDING_DIR_FORMAT: &str = "%Y-%m-%d-%H%M%S";
 
 const RECORDING_DIR: &str = "Recording";
 const PENDING_DIR: &str = "Pending";
 const TRASH_DIR: &str = "Trash";
 const SETTINGS_FILE: &str = "settings.json";
+const SETTINGS_TMP_EXT: &str = "json.tmp";
+const SETTINGS_BACKUP_EXT: &str = "json.bak";
+/// 다른 볼륨으로 복사하는 동안 쓰는 임시 이름 앞뒤
+const COPY_PART_PREFIX: &str = ".earshot-";
+const COPY_PART_EXT: &str = "part";
+/// 분류 이름이 다 지워졌을 때 쓰는 폴더 이름
+const FALLBACK_FOLDER: &str = "분류";
 const WAV_EXT: &str = "wav";
 const META_EXT: &str = "json";
 /// datetime-local 입력 값
@@ -95,12 +106,40 @@ fn settings_path() -> Result<PathBuf> {
         .join(SETTINGS_FILE))
 }
 
-/// Documents\EarShot\<이름>
+/// Documents\EarShot\<이름>. 이름은 clean 하고 끝의 점·공백도 뗀다(윈도우가 무시함, ".." 방지).
 fn default_path(name: &str) -> String {
     let documents = dirs::document_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
         .unwrap_or_default();
-    documents.join(APP_NAME).join(name).to_string_lossy().into_owned()
+    let cleaned = clean(name);
+    let folder = cleaned.trim_matches(|c: char| c == '.' || c == ' ');
+    let folder = if folder.is_empty() { FALLBACK_FOLDER } else { folder };
+    documents.join(APP_NAME).join(folder).to_string_lossy().into_owned()
+}
+
+/// 짧은 랜덤 16진수 8자. 크레이트 없이 RandomState(호출마다 다른 키) + 나노초로 만든다.
+pub fn random_hex8() -> String {
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let mut hasher = RandomState::new().build_hasher();
+    hasher.write_u128(nanos);
+    format!("{:08x}", hasher.finish() as u32)
+}
+
+/// "<시작 시각>-<랜덤 8자>"
+pub fn new_recording_id(now: &DateTime<Local>) -> String {
+    format!("{}-{}", now.format(RECORDING_DIR_FORMAT), random_hex8())
+}
+
+/// id 앞부분의 시작 시각. 뒤에 붙은 "-랜덤", "-N" 은 떼어 가며 읽는다.
+pub fn started_from_id(id: &str) -> Option<NaiveDateTime> {
+    let mut head = id;
+    for _ in 0..3 {
+        if let Ok(time) = NaiveDateTime::parse_from_str(head, RECORDING_DIR_FORMAT) {
+            return Some(time);
+        }
+        head = head.rsplit_once('-')?.0;
+    }
+    None
 }
 
 // MARK: - 설정
@@ -116,29 +155,45 @@ fn default_categories() -> Vec<Category> {
         .collect()
 }
 
-/// 처음이거나 읽지 못하면 기본 목록을 만들어 저장한다(맥과 같음).
+/// 처음이면 기본 목록을 만들어 저장한다(맥과 같음).
+/// 있는데 못 읽으면 settings.json.bak 으로 남긴 뒤 기본값을 쓴다. 백업이 안 되면 덮어쓰지 않는다.
 pub fn load_categories() -> Result<Vec<Category>> {
     let path = settings_path()?;
-    if let Ok(text) = fs::read_to_string(&path) {
-        if let Ok(settings) = serde_json::from_str::<Settings>(&text) {
-            if !settings.categories.is_empty() {
-                return Ok(settings.categories);
+    let list = default_categories();
+    match fs::read_to_string(&path) {
+        Ok(text) => {
+            if let Ok(settings) = serde_json::from_str::<Settings>(&text) {
+                if !settings.categories.is_empty() {
+                    return Ok(settings.categories);
+                }
+            }
+            if let Err(e) = fs::copy(&path, path.with_extension(SETTINGS_BACKUP_EXT)) {
+                eprintln!("설정 백업 실패, 기본값을 저장하지 않아요: {e}");
+                return Ok(list);
             }
         }
+        Err(e) if e.kind() == ErrorKind::NotFound => {}
+        Err(e) => {
+            // 잠김 등 읽기 실패 — 원본을 지키려고 저장하지 않는다.
+            eprintln!("설정 읽기 실패, 기본값으로 엽니다: {e}");
+            return Ok(list);
+        }
     }
-    let list = default_categories();
     store_categories(&list)?;
     Ok(list)
 }
 
+/// 임시 파일에 다 쓴 뒤 rename 한다(쓰다 죽어도 원본이 남음).
 fn store_categories(list: &[Category]) -> Result<()> {
     let path = settings_path()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let settings = Settings { categories: list.to_vec() };
-    fs::write(&path, serde_json::to_string_pretty(&settings)?)
-        .with_context(|| format!("{} 저장", path.display()))
+    let tmp = path.with_extension(SETTINGS_TMP_EXT);
+    fs::write(&tmp, serde_json::to_string_pretty(&settings)?)
+        .with_context(|| format!("{} 저장", tmp.display()))?;
+    fs::rename(&tmp, &path).with_context(|| format!("{} 저장", path.display()))
 }
 
 /// 이름은 앞뒤 공백을 떼고, 빈 경로는 기본 경로로 채워 저장한다.
@@ -225,7 +280,7 @@ pub fn pending_item(id: &str) -> Result<PendingItem> {
         .as_ref()
         .and_then(|m| DateTime::parse_from_rfc3339(&m.started_at).ok())
         .map(|t| t.with_timezone(&Local).naive_local())
-        .or_else(|| NaiveDateTime::parse_from_str(id, RECORDING_DIR_FORMAT).ok())
+        .or_else(|| started_from_id(id))
         .unwrap_or_else(|| Local::now().naive_local());
     Ok(PendingItem {
         id: id.to_string(),
@@ -279,14 +334,33 @@ pub fn trash(id: &str) -> Result<()> {
     Ok(())
 }
 
-/// 같은 볼륨이면 rename, 아니면 복사 후 지운다.
+/// 같은 볼륨이면 rename. 아니면 대상 폴더에 .earshot-<랜덤>.part 로 복사해 크기를 맞춰 본 뒤
+/// 최종 이름으로 바꾸고 원본을 지운다. 실패하면 part 를 지우고 원본은 남긴다.
 fn move_file(from: &Path, to: &Path) -> Result<()> {
     if fs::rename(from, to).is_ok() {
         return Ok(());
     }
-    fs::copy(from, to).with_context(|| format!("{} → {} 복사", from.display(), to.display()))?;
-    fs::remove_file(from).with_context(|| format!("{} 지우기", from.display()))?;
+    let folder = to.parent().context("대상 폴더가 없어요")?;
+    let part = folder.join(format!("{COPY_PART_PREFIX}{}.{COPY_PART_EXT}", random_hex8()));
+    if let Err(e) = copy_checked(from, &part, to) {
+        let _ = fs::remove_file(&part);
+        return Err(e);
+    }
+    // 이미 대상에 다 옮겨졌으니 원본 지우기 실패는 로그만 남긴다.
+    if let Err(e) = fs::remove_file(from) {
+        eprintln!("{} 지우기 실패: {e}", from.display());
+    }
     Ok(())
+}
+
+fn copy_checked(from: &Path, part: &Path, to: &Path) -> Result<()> {
+    let expected = fs::metadata(from).with_context(|| format!("{} 읽기", from.display()))?.len();
+    fs::copy(from, part).with_context(|| format!("{} → {} 복사", from.display(), part.display()))?;
+    let copied = fs::metadata(part).with_context(|| format!("{} 읽기", part.display()))?.len();
+    if copied != expected {
+        bail!("복사한 크기가 달라요({copied} / {expected}): {}", to.display());
+    }
+    fs::rename(part, to).with_context(|| format!("{} 옮기기", to.display()))
 }
 
 // MARK: - 파일 이름 (Delivery.swift 그대로)
@@ -303,6 +377,18 @@ pub fn unique_path(folder: &Path, file_name: &str) -> PathBuf {
         number += 1;
     }
     path
+}
+
+/// folder 안에 exts 어느 확장자로도 없는 기본 이름. 겹치면 "-2", "-3" 을 붙인다(unique_path 와 같은 방식).
+pub fn unique_stem(folder: &Path, base: &str, exts: &[&str]) -> String {
+    let taken = |stem: &str| exts.iter().any(|ext| folder.join(format!("{stem}.{ext}")).exists());
+    let mut stem = base.to_string();
+    let mut number = 2;
+    while taken(&stem) {
+        stem = format!("{base}-{number}");
+        number += 1;
+    }
+    stem
 }
 
 /// "yyyy-MM-dd-HHmm-<앱>[-<주제>][-참석 a,b].wav". 못 쓰는 문자는 지우고 공백은 하나로.
@@ -400,6 +486,21 @@ mod tests {
     #[test]
     fn 못_쓰는_문자_제거() {
         assert_eq!(file_name(&at(), "", "a/b:c?", ""), "2026-11-20-1405-전체-abc.wav");
+    }
+
+    #[test]
+    fn id_에서_시각() {
+        let at = NaiveDateTime::parse_from_str("2026-11-20-140501", RECORDING_DIR_FORMAT).unwrap();
+        assert_eq!(started_from_id("2026-11-20-140501"), Some(at));
+        assert_eq!(started_from_id("2026-11-20-140501-ab12cd34"), Some(at));
+        assert_eq!(started_from_id("2026-11-20-140501-ab12cd34-2"), Some(at));
+        assert_eq!(started_from_id("엉뚱"), None);
+    }
+
+    #[test]
+    fn 기본_경로_정리() {
+        assert!(default_path("a/b").ends_with("ab"));
+        assert!(default_path("..").ends_with(FALLBACK_FOLDER));
     }
 
     #[test]
