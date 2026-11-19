@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "저장 창·설정 창 권한",
+  "windows": ["save", "settings"],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>녹음 저장</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main>
+      <p id="summary" class="muted"></p>
+      <form id="form" class="fields">
+        <label>날짜·시간 <input id="date" type="datetime-local" required /></label>
+        <label>주제 <input id="topic" type="text" autocomplete="off" /></label>
+        <label>참석자 <input id="attendees" type="text" placeholder="쉼표로 구분(선택)" autocomplete="off" /></label>
+      </form>
+      <div class="actions">
+        <button id="later" type="button">나중에</button>
+        <button id="trash" type="button">삭제…</button>
+        <span class="spacer"></span>
+        <div id="categories" class="categories"></div>
+      </div>
+      <p id="error" class="error" hidden></p>
+    </main>
+    <script type="module" src="/src/save.ts"></script>
+  </body>
+</html>
