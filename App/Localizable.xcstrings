@@ -109,6 +109,22 @@
         }
       }
     },
+    "%lld초보다 짧은 녹음이라 저장하지 않았어요": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording was shorter than %lld seconds, so it wasn't saved"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld초보다 짧은 녹음이라 저장하지 않았어요"
+          }
+        }
+      }
+    },
     "감지 로그 열기": {
       "localizations": {
         "en": {
