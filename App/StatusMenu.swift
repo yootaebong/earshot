@@ -12,6 +12,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let delivery: Delivery
     private let saveQueue: SaveQueue
     private let autoRecorder: AutoRecorder
+    private let transcriber: Transcriber
+    private let models = ModelStore.shared
     private let audioSettings = AudioSettings.shared
     private let autoSettings = AutoRecordSettings.shared
     private let conversion = ConversionStatus.shared
@@ -25,6 +27,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var micLevelItem: NSMenuItem?
     private var elapsedItem: NSMenuItem?
     private var conversionItems: [String: NSMenuItem] = [:]
+    private var transcribeItem: NSMenuItem?
+    private var modelItem: NSMenuItem?
     private var cancellables: Set<AnyCancellable> = []
     private var structureDirty = false
     /// 마지막으로 만든 메뉴의 구조(줄·체크). 같으면 다시 만들지 않는다 — 다시 만들면 열린 하위 메뉴가 닫힌다.
@@ -36,13 +40,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private static let recordingSymbol = NSImage(systemSymbolName: "ear.badge.waveform", accessibilityDescription: nil) != nil ? "ear.badge.waveform" : "record.circle"
     private static let levelBarCount = 10
 
-    init(monitor: MicMonitor, recorder: RecordingController, loginItem: LoginItem, delivery: Delivery, saveQueue: SaveQueue, autoRecorder: AutoRecorder) {
+    init(monitor: MicMonitor, recorder: RecordingController, loginItem: LoginItem, delivery: Delivery, saveQueue: SaveQueue,
+         autoRecorder: AutoRecorder, transcriber: Transcriber) {
         self.monitor = monitor
         self.recorder = recorder
         self.loginItem = loginItem
         self.delivery = delivery
         self.saveQueue = saveQueue
         self.autoRecorder = autoRecorder
+        self.transcriber = transcriber
         super.init()
     }
 
@@ -68,6 +74,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             audioSettings.objectWillChange.map { _ in }.eraseToAnyPublisher(),
             autoSettings.objectWillChange.map { _ in }.eraseToAnyPublisher(),
             updates.objectWillChange.map { _ in }.eraseToAnyPublisher(),
+            // 받아쓰기·모델 %는 구조 값에 넣지 않아 바뀌어도 그 줄 글자만 고친다.
+            transcriber.objectWillChange.map { _ in }.eraseToAnyPublisher(),
+            models.objectWillChange.map { _ in }.eraseToAnyPublisher(),
         ]
         Publishers.MergeMany(structural)
             .sink { [weak self] in self?.schedule(structure: true) }
@@ -139,6 +148,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         for item in conversion.items {
             conversionItems[item.id]?.title = Self.conversionTitle(item)
         }
+        transcribeItem?.title = transcribeTitle
+        modelItem?.title = modelTitle
     }
 
     // MARK: - NSMenuDelegate
@@ -167,6 +178,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             "\(saveQueue.pending) \(delivery.waitingCount) \(delivery.failedCount) \(loginItem.isEnabled)",
             "\(autoSettings.isEnabled) \(autoSettings.appIDs.sorted())",
             "\(audioSettings.source) \(audioSettings.splitChannels) \(audioSettings.micUID ?? "-") \(audioSettings.isMicMissing)",
+            "\(transcriber.currentAppName ?? "-") \(transcriber.waitingCount) \(modelStateKind)",
         ]
         parts += audioSettings.inputDevices.map { "\($0.uid) \($0.name)" }
         parts += monitor.inputApps.map { "\($0.appName) \($0.appBundleID) \($0.isMeeting) \(autoSettings.isTarget($0))" }
@@ -180,6 +192,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         micLevelItem = nil
         elapsedItem = nil
         conversionItems = [:]
+        transcribeItem = nil
+        modelItem = nil
 
         if let release = updates.available {
             menu.addItem(ActionItem(String(localized: "새 버전 \(release.version) 받기…")) { [weak self] in self?.updates.download() })
@@ -209,6 +223,24 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let item = Self.label(Self.conversionTitle(conversionItem))
             menu.addItem(item)
             conversionItems[conversionItem.id] = item
+        }
+        // 받아쓰는 중이면 진행률, 대기만 있으면 개수. 모델이 없으면 누르면 설정 창
+        if transcriber.currentAppName != nil {
+            let item = Self.label(transcribeTitle)
+            menu.addItem(item)
+            transcribeItem = item
+        } else if transcriber.waitingCount > 0 {
+            switch models.state {
+            case .ready, .downloading:
+                menu.addItem(Self.label(String(localized: "받아쓰기 대기 \(transcriber.waitingCount)개")))
+            case .missing, .failed:
+                menu.addItem(ActionItem(String(localized: "받아쓰기 대기 \(transcriber.waitingCount)개 — 모델 필요")) { SettingsWindow.show() })
+            }
+        }
+        if case .downloading = models.state {
+            let item = Self.label(modelTitle)
+            menu.addItem(item)
+            modelItem = item
         }
         // 전역 단축키는 GlobalHotKey 가 잡는다. 여기 지정은 메뉴에 표시하려는 것.
         let toggle = ActionItem(recorder.isRecording ? String(localized: "녹음 멈추기") : String(localized: "녹음 시작")) { [weak self] in
@@ -301,6 +333,25 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var appLevelTitle: String { String(localized: "맥 소리 \(Self.levelBar(recorder.live.appLevel))") }
     private var micLevelTitle: String { String(localized: "마이크 \(Self.levelBar(recorder.live.micLevel))") }
     private var elapsedTitle: String { String(localized: "녹음 중: \(recorder.current?.appName ?? "") \(recorder.live.elapsedText)") }
+
+    private var transcribeTitle: String {
+        String(localized: "받아쓰는 중: \(transcriber.currentAppName ?? "") \(Int((transcriber.fraction * 100).rounded(.down)))%")
+    }
+
+    private var modelTitle: String {
+        guard case .downloading(let fraction) = models.state else { return "" }
+        return String(localized: "모델 내려받는 중 \(Int((fraction * 100).rounded(.down)))%")
+    }
+
+    /// 모델 상태에서 %를 뺀 것(구조 비교용)
+    private var modelStateKind: String {
+        switch models.state {
+        case .missing: "missing"
+        case .downloading: "downloading"
+        case .ready: "ready"
+        case .failed: "failed"
+        }
+    }
 
     private static func conversionTitle(_ item: ConversionStatus.Item) -> String {
         String(localized: "변환 중: \(item.appName) \(Int((item.fraction * 100).rounded(.down)))%")

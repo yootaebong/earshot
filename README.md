@@ -35,6 +35,7 @@ When you stop, it converts the recording (with a progress readout in the menu ba
 | ⏳ **Conversion progress** | After you stop, the menu bar shows the conversion progress (a two-hour meeting takes about 40 seconds) |
 | 🗂️ **Save when you are ready** | No window pops up over your screen after a meeting — you get a notification instead. Click it (or pick the recording from the "Unsorted" menu) to open the save window: date and time (prefilled with the start time), topic, attendees → pick a category. "Later" keeps it in "Unsorted" |
 | 🏷️ **Your own categories** | Rename, add (up to 6) or remove categories and choose a folder for each in Settings |
+| 📝 **On-device transcription (opt-in)** | Turn on "Transcribe" for a category in Settings and recordings saved there are transcribed with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) while nothing is recording, and a `same-name.md` lands next to the recording. Nothing is sent over the internet. The model (about 575 MB) is downloaded the first time you turn it on. Split recordings get speaker labels like `**[00:01:23] Me:**` / `**[00:01:30] Other:**`; mixed recordings get timestamps only. Speaker names and language (auto, Korean, English, Japanese, Chinese) are in Settings. Pauses while you record and resumes afterwards; the queue survives restarts. On Apple Silicon a one-hour split recording takes about 3–4 minutes and about 1 GB of memory. Intel Macs can be much slower |
 | 📤 **Reliable delivery** | If a folder is unavailable (e.g. a NAS volume isn't mounted), files wait in an outbox and are retried every 60 seconds and whenever a volume mounts. A file that fails 5 times for the same reason is moved aside to "Failed to Send" |
 | 🚀 **Launch at login** | Starts with your Mac and restarts if it crashes (quitting from the menu keeps it off) |
 | 🌐 **English and Korean** | Follows your macOS language |
@@ -60,6 +61,8 @@ The attendee list is part of the name so that downstream tools (for example a tr
 | `~/Library/Application Support/EarShot/Pending/` | Finished m4a files waiting to be sorted |
 | `~/Library/Application Support/EarShot/Outbox/<category>/` | Files waiting to be delivered (menu "Waiting to Send") |
 | `~/Library/Application Support/EarShot/Outbox/실패/` | Files that could not be delivered (menu "Failed to Send") |
+| `~/Library/Application Support/EarShot/Models/` | Transcription models (can be deleted in Settings) |
+| `~/Library/Application Support/EarShot/Transcribe/<category>/` | Copies waiting to be transcribed. Failed ones go to `Transcribe/실패/` |
 | `~/Library/Logs/EarShot/detect.log` | App log (menu "Open Detection Log") |
 
 Missing destination folders inside your home folder are created automatically. Folders on external or network volumes (`/Volumes/…`) and cloud-synced folders (`~/Library/CloudStorage/…`) are not — EarShot waits until they are available.
@@ -133,7 +136,8 @@ macOS asks twice the first time you record. Allow both:
 | `App/MicMonitor.swift` | Detects which app is using the microphone, logging |
 | `App/SaveWindow.swift` | Save window and the unsorted queue |
 | `App/Delivery.swift` | Delivery, retries, file names |
-| `App/Settings.swift` | Categories and folders, microphone, capture source |
+| `App/Settings.swift` | Categories and folders, microphone, capture source, transcription |
+| `App/Transcriber.swift` | Model download, transcription queue, whisper.cpp, Markdown output |
 | `App/LoginItem.swift` | LaunchAgent for launch at login and auto-restart |
 | `App/GlobalHotKey.swift` | Global shortcut |
 | `App/AudioCapturePermission.swift` | System audio recording permission |

@@ -11,6 +11,7 @@ final class SaveQueue: ObservableObject {
     @Published private(set) var pending: [URL] = []
 
     private let delivery: Delivery
+    private let transcriber: Transcriber
     /// 자동으로 띄울 차례
     private var waiting: [URL] = []
     /// 보내는 중이라 목록에서 뺄 것
@@ -19,8 +20,9 @@ final class SaveQueue: ObservableObject {
     private var panel: NSPanel?
     private var cancellables: Set<AnyCancellable> = []
 
-    init(delivery: Delivery) {
+    init(delivery: Delivery, transcriber: Transcriber) {
         self.delivery = delivery
+        self.transcriber = transcriber
         refresh()
         NotificationRouter.shared.setOnOpen { [weak self] url in
             guard let self else { return }
@@ -157,6 +159,11 @@ final class SaveQueue: ObservableObject {
         sending.insert(url)
         panel?.close()
         Task {
+            // 받아쓰기를 켠 분류면 보내기 전에 대기열로 복사한다(보내면 Pending 에서 지워진다). 복사 실패는 로그만 남기고 저장은 계속.
+            if TranscriptionSettings.shared.transcribes(category.id) {
+                let queued = RecordingMeta(startedAt: date, appName: meta.appName, duration: meta.duration, split: meta.split)
+                await transcriber.enqueue(url, meta: queued, categoryID: category.id, fileName: name)
+            }
             await delivery.send(url, category: category, fileName: name)
             sending.remove(url)
             refresh()

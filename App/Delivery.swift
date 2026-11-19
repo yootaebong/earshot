@@ -47,9 +47,9 @@ final class Delivery: ObservableObject {
         retry()
     }
 
-    /// Pending 의 m4a(+json)를 category 폴더에 fileName 으로 보낸다. 안 되면 Outbox 로 옮긴다.
-    func send(_ m4a: URL, category: Category, fileName: String) async {
-        await Self.run { Self.deliver(m4a, category: category, fileName: fileName) }
+    /// Pending 의 m4a(+json)나 받아쓰기 대기열의 md 를 category 폴더에 fileName 으로 보낸다. 안 되면 Outbox 로 옮긴다.
+    func send(_ file: URL, category: Category, fileName: String) async {
+        await Self.run { Self.deliver(file, category: category, fileName: fileName) }
         await refreshCounts()
     }
 
@@ -98,16 +98,16 @@ final class Delivery: ObservableObject {
     }
 
     nonisolated private static func countOutbox() -> Int {
-        outboxFolders().reduce(0) { $0 + m4aFiles(in: $1).count }
+        outboxFolders().reduce(0) { $0 + deliverableFiles(in: $1).count }
     }
 
     /// 이 분류의 Outbox 에서 보낼 차례를 기다리는 파일 수(설정 창에서 지워도 되는지 볼 때)
     nonisolated static func waitingCount(categoryID: Category.ID) -> Int {
-        m4aFiles(in: outbox(id: categoryID)).count
+        deliverableFiles(in: outbox(id: categoryID)).count
     }
 
     nonisolated private static func countFailed() -> Int {
-        m4aFiles(in: failedURL).count
+        deliverableFiles(in: failedURL).count
     }
 
     /// 복사 실패를 하나 센다. maxCopyFailures 에 닿으면 실패 폴더로 옮기고 true.
@@ -136,9 +136,12 @@ final class Delivery: ObservableObject {
         .ENOSPC, .EDQUOT, .EACCES, .EPERM, .EIO, .ETIMEDOUT, .ENETDOWN, .ENETUNREACH, .ENOTCONN, .EHOSTUNREACH, .ECONNRESET, .ESTALE,
     ]
 
-    nonisolated private static func m4aFiles(in folder: URL) -> [URL] {
+    /// 보낼 파일 확장자 — 녹음과 받아쓴 글
+    nonisolated private static let deliverableExtensions: Set<String> = ["m4a", "md"]
+
+    nonisolated private static func deliverableFiles(in folder: URL) -> [URL] {
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        return files.filter { $0.pathExtension == "m4a" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        return files.filter { deliverableExtensions.contains($0.pathExtension) }.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     /// 없으면 만들어도 되는 경로인지. 홈 폴더 아래만 만들고, 외장·네트워크 볼륨(/Volumes)과
@@ -169,26 +172,27 @@ final class Delivery: ObservableObject {
         return .success(URL(filePath: path, directoryHint: .isDirectory))
     }
 
-    nonisolated private static func deliver(_ m4a: URL, category: Category, fileName: String) {
+    nonisolated private static func deliver(_ file: URL, category: Category, fileName: String) {
         let fm = FileManager.default
         // 저장 창이 뜬 뒤 설정에서 경로를 바꿨을 수 있으니 지금 목록에서 다시 찾는다(지운 분류면 받은 그대로).
         let category = StorageSettings.loadCategories().first { $0.id == category.id } ?? category
-        let json = RecordingMeta.jsonURL(for: m4a)
+        // 옆의 메타(.json)는 Pending 의 m4a 에만 있다. md 옆 같은 이름 json 은 받아쓰기 대기열 것이라 건드리지 않는다.
+        let json: URL? = file.pathExtension == "m4a" ? RecordingMeta.jsonURL(for: file) : nil
         // 폴더 없음·쓰기 불가는 붙으면 풀리니 세지 않는다. 그 뒤(복사)에서 틀어진 것만 센다.
         var copyAttempted = false
         do {
             let folder = try destination(category).get()
             copyAttempted = true
-            let sent = try copyVerified(m4a, to: folder, fileName: fileName)
-            try? fm.removeItem(at: m4a)
-            try? fm.removeItem(at: json)
+            let sent = try copyVerified(file, to: folder, fileName: fileName)
+            try? fm.removeItem(at: file)
+            if let json { try? fm.removeItem(at: json) }
             MicMonitor.log("보냄 \(sent.path)")
         } catch {
             do {
                 try fm.createDirectory(at: outbox(category), withIntermediateDirectories: true)
                 let held = uniqueURL(in: outbox(category), fileName: fileName)
-                try fm.moveItem(at: m4a, to: held)
-                try? fm.removeItem(at: json)
+                try fm.moveItem(at: file, to: held)
+                if let json { try? fm.removeItem(at: json) }
                 MicMonitor.log("보류 \(error.localizedDescription) → \(held.path)")
                 // 이후 Outbox 재시도와 이어 세도록 옮긴 경로로 센다.
                 if copyAttempted { _ = recordCopyFailure(held, error: error) }
@@ -201,7 +205,7 @@ final class Delivery: ObservableObject {
 
     nonisolated private static func flushOutbox() {
         // 사용자가 Outbox 에서 지운 파일의 횟수는 버린다(같은 이름이 다시 오면 처음부터 센다).
-        let present = Set(outboxFolders().flatMap { m4aFiles(in: $0).map(\.path) })
+        let present = Set(outboxFolders().flatMap { deliverableFiles(in: $0).map(\.path) })
         copyFailures = copyFailures.filter { present.contains($0.key) }
         let categories = StorageSettings.loadCategories()
         moveOrphans(keeping: Set(categories.map(\.id)))
@@ -210,7 +214,7 @@ final class Delivery: ObservableObject {
             // 폴더가 없으면 조용히 다음 때 다시(60초마다 같은 보류 로그를 쌓지 않는다).
             guard case .success(let folder) = destination(category) else { continue }
             removeLeftoverParts(in: folder)
-            let files = m4aFiles(in: outbox(category))
+            let files = deliverableFiles(in: outbox(category))
             for file in files {
                 do {
                     let sent = try copyVerified(file, to: folder, fileName: file.lastPathComponent)
@@ -232,7 +236,7 @@ final class Delivery: ObservableObject {
     nonisolated private static func moveOrphans(keeping ids: Set<Category.ID>) {
         let fm = FileManager.default
         for folder in outboxFolders() where !ids.contains(folder.lastPathComponent) {
-            for file in m4aFiles(in: folder) {
+            for file in deliverableFiles(in: folder) {
                 do {
                     try fm.createDirectory(at: failedURL, withIntermediateDirectories: true)
                     let moved = uniqueURL(in: failedURL, fileName: file.lastPathComponent)

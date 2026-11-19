@@ -109,10 +109,12 @@ final class StorageSettings: ObservableObject {
         update(categories + [Category(id: UUID().uuidString, name: name, path: Self.defaultPath(name: name))])
     }
 
-    /// 보낼 대기 파일이 있으면 지우지 않는다(Outbox 에 남아 영영 안 간다).
+    /// 보낼 대기·받아쓸 대기 파일이 있으면 지우지 않는다(Outbox·대기열에 남아 영영 안 간다).
     func remove(_ id: Category.ID) {
-        guard categories.count > Self.minCount, Delivery.waitingCount(categoryID: id) == 0 else { return }
+        guard categories.count > Self.minCount, Delivery.waitingCount(categoryID: id) == 0,
+              Transcriber.waitingCount(categoryID: id) == 0 else { return }
         update(categories.filter { $0.id != id })
+        TranscriptionSettings.shared.setTranscribes(false, for: id)
     }
 
     /// NSOpenPanel 로 폴더를 고른다.
@@ -135,11 +137,13 @@ final class StorageSettings: ObservableObject {
 /// 메뉴 "저장 위치…" 창
 struct StorageSettingsView: View {
     @ObservedObject var settings: StorageSettings
+    @ObservedObject var transcription = TranscriptionSettings.shared
+    @ObservedObject var models = ModelStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(settings.categories) { category in
-                CategoryRow(category: category, settings: settings)
+                CategoryRow(category: category, settings: settings, transcription: transcription, models: models)
             }
             HStack {
                 Spacer()
@@ -148,23 +152,29 @@ struct StorageSettingsView: View {
                     .help(settings.categories.count >= StorageSettings.maxCount
                           ? String(localized: "분류는 최대 \(StorageSettings.maxCount)개까지예요") : "")
             }
+            Divider()
+            TranscriptionSection(transcription: transcription, models: models)
         }
         .padding(20)
-        .frame(width: 560)
+        .frame(width: 640)
     }
 }
 
-/// 분류 한 줄: [이름][경로][바꾸기][삭제]
+/// 분류 한 줄: [이름][경로][받아쓰기][바꾸기][삭제]
 private struct CategoryRow: View {
     let category: Category
     @ObservedObject var settings: StorageSettings
+    @ObservedObject var transcription: TranscriptionSettings
+    @ObservedObject var models: ModelStore
 
     @State private var draft: String
     @FocusState private var nameFocused: Bool
 
-    init(category: Category, settings: StorageSettings) {
+    init(category: Category, settings: StorageSettings, transcription: TranscriptionSettings, models: ModelStore) {
         self.category = category
         self.settings = settings
+        self.transcription = transcription
+        self.models = models
         _draft = State(initialValue: category.name)
     }
 
@@ -182,6 +192,13 @@ private struct CategoryRow: View {
                 .truncationMode(.middle)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            // 켰는데 모델이 없으면 바로 내려받는다.
+            Toggle("받아쓰기", isOn: Binding(
+                get: { transcription.transcribes(category.id) },
+                set: { on in
+                    transcription.setTranscribes(on, for: category.id)
+                    if on { models.downloadIfNeeded() }
+                }))
             Button("바꾸기") { settings.choose(for: category.id) }
             Button("삭제") { settings.remove(category.id) }
                 .disabled(deleteBlockedReason != nil)
@@ -198,7 +215,188 @@ private struct CategoryRow: View {
     private var deleteBlockedReason: String? {
         if settings.categories.count <= StorageSettings.minCount { return String(localized: "분류는 하나 이상 있어야 해요") }
         if Delivery.waitingCount(categoryID: category.id) > 0 { return String(localized: "보낼 대기 파일이 있어 지울 수 없어요") }
+        if Transcriber.waitingCount(categoryID: category.id) > 0 { return String(localized: "받아쓸 대기 파일이 있어 지울 수 없어요") }
         return nil
+    }
+}
+
+/// 설정 창 아래 "받아쓰기" 구역: 모델 상태, 화자 이름, 언어
+private struct TranscriptionSection: View {
+    @ObservedObject var transcription: TranscriptionSettings
+    @ObservedObject var models: ModelStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("받아쓰기").font(.headline)
+            Text("켠 분류의 녹음은 이 맥에서 받아써 같은 폴더에 .md 로 보내요")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            modelRow
+            HStack {
+                Text("내 이름")
+                SpeakerNameField(value: transcription.speakerMe) { transcription.setSpeakerMe($0) }
+                Text("상대 이름")
+                SpeakerNameField(value: transcription.speakerOther) { transcription.setSpeakerOther($0) }
+                Spacer()
+            }
+            Picker("언어", selection: Binding(get: { transcription.language }, set: { transcription.setLanguage($0) })) {
+                ForEach(TranscriptionSettings.languages, id: \.self) { code in
+                    Text(verbatim: TranscriptionSettings.languageName(code)).tag(code)
+                }
+            }
+            .fixedSize()
+        }
+    }
+
+    @ViewBuilder private var modelRow: some View {
+        HStack {
+            switch models.state {
+            case .missing:
+                downloadButton
+            case .failed(let message):
+                Text("내려받기 실패: \(message)")
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+                downloadButton
+            case .downloading(let fraction):
+                ProgressView(value: fraction)
+                    .frame(width: 240)
+                Text(verbatim: "\(Int((fraction * 100).rounded(.down)))%")
+                    .monospacedDigit()
+                Button("취소") { models.cancel() }
+            case .ready:
+                Text("모델 준비됨")
+                Button("지우기") { models.delete() }
+            }
+            Spacer()
+        }
+    }
+
+    private var downloadButton: some View {
+        Button("모델 내려받기 (약 575MB)") { models.download() }
+    }
+}
+
+/// 화자 이름 칸. 이름 칸처럼 엔터·포커스가 빠질 때 저장하고, 빈 이름이면 원래 이름으로 되돌린다.
+private struct SpeakerNameField: View {
+    let value: String
+    let onCommit: (String) -> Void
+
+    @State private var draft: String
+    @FocusState private var focused: Bool
+
+    init(value: String, onCommit: @escaping (String) -> Void) {
+        self.value = value
+        self.onCommit = onCommit
+        _draft = State(initialValue: value)
+    }
+
+    var body: some View {
+        TextField(value, text: $draft)
+            .labelsHidden()
+            .frame(width: 100)
+            .focused($focused)
+            .onChange(of: focused) { _, focused in if !focused { commit() } }
+            .onSubmit { commit() }
+            .onChange(of: value) { _, value in if !focused { draft = value } }
+    }
+
+    private func commit() {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty {
+            draft = value
+        } else {
+            draft = name
+            onCommit(name)
+        }
+    }
+}
+
+/// 받아쓰기 설정. 분류마다 켜고 끄는 값은 Category 에 넣지 않고 따로 둔다 —
+/// Category 에 키를 더하면 예전 JSON 을 못 읽어 분류가 기본값으로 날아간다.
+@MainActor
+final class TranscriptionSettings: ObservableObject {
+    static let shared = TranscriptionSettings()
+    /// 언어 선택지. auto 는 첫 조각에서 정해 그 파일 끝까지 쓴다.
+    nonisolated static let languages = ["auto", "ko", "en", "ja", "zh"]
+    nonisolated static let autoLanguage = "auto"
+
+    nonisolated private static let categoryIDsKey = "transcribeCategoryIDs"
+    nonisolated private static let meKey = "speakerNameMe"
+    nonisolated private static let otherKey = "speakerNameOther"
+    nonisolated private static let languageKey = "transcribeLanguage"
+
+    /// 받아쓰기를 켠 분류 id
+    @Published private(set) var categoryIDs: Set<Category.ID>
+    @Published private(set) var speakerMe: String
+    @Published private(set) var speakerOther: String
+    @Published private(set) var language: String
+
+    private init() {
+        categoryIDs = Self.transcribedCategoryIDs
+        let names = Self.speakerNames
+        speakerMe = names.me
+        speakerOther = names.other
+        language = Self.languageCode
+    }
+
+    // 받아쓰기 큐(백그라운드)에서 읽는다.
+    nonisolated static var transcribedCategoryIDs: Set<Category.ID> {
+        Set(UserDefaults.standard.stringArray(forKey: categoryIDsKey) ?? [])
+    }
+
+    nonisolated static var speakerNames: (me: String, other: String) {
+        let defaults = UserDefaults.standard
+        return (defaults.string(forKey: meKey) ?? String(localized: "나"),
+                defaults.string(forKey: otherKey) ?? String(localized: "상대"))
+    }
+
+    nonisolated static var languageCode: String {
+        UserDefaults.standard.string(forKey: languageKey).flatMap { languages.contains($0) ? $0 : nil } ?? autoLanguage
+    }
+
+    /// 화면에 보일 언어 이름(지금 언어로)
+    static func languageName(_ code: String) -> String {
+        guard code != autoLanguage else { return String(localized: "자동") }
+        return Locale.current.localizedString(forLanguageCode: code) ?? code
+    }
+
+    func transcribes(_ id: Category.ID) -> Bool {
+        categoryIDs.contains(id)
+    }
+
+    func setTranscribes(_ on: Bool, for id: Category.ID) {
+        guard on != categoryIDs.contains(id) else { return }
+        var ids = categoryIDs
+        if on { ids.insert(id) } else { ids.remove(id) }
+        UserDefaults.standard.set(ids.sorted(), forKey: Self.categoryIDsKey)
+        categoryIDs = ids
+        MicMonitor.log("받아쓰기 \(id) → \(on)")
+    }
+
+    func setSpeakerMe(_ name: String) {
+        guard let name = Self.cleanName(name), name != speakerMe else { return }
+        UserDefaults.standard.set(name, forKey: Self.meKey)
+        speakerMe = name
+    }
+
+    func setSpeakerOther(_ name: String) {
+        guard let name = Self.cleanName(name), name != speakerOther else { return }
+        UserDefaults.standard.set(name, forKey: Self.otherKey)
+        speakerOther = name
+    }
+
+    func setLanguage(_ code: String) {
+        guard Self.languages.contains(code), code != language else { return }
+        UserDefaults.standard.set(code, forKey: Self.languageKey)
+        language = code
+        MicMonitor.log("받아쓰기 언어 → \(code)")
+    }
+
+    /// 앞뒤 공백을 뗀다. 비면 nil(저장 안 함)
+    private static func cleanName(_ name: String) -> String? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 }
 
