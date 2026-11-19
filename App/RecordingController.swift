@@ -139,7 +139,7 @@ final class RecordingController: ObservableObject {
     /// 메뉴·단축키 토글
     func toggle() {
         if session != nil {
-            finish()
+            finish(manual: true)
             return
         }
         guard !isStarting else { return }
@@ -456,7 +456,8 @@ final class RecordingController: ObservableObject {
         return Segment(tap: tap, mic: mic, micDeviceID: deviceID)
     }
 
-    private func finish() {
+    /// manual 은 ⌃⌥R·메뉴로 멈춘 경우 — 30초 미만이라 버리면 알린다(자동 녹음은 짧은 마이크 사용이 흔해 알리지 않는다).
+    private func finish(manual: Bool = false) {
         guard let session else { return }
         self.session = nil
         retryingDirectory = nil
@@ -476,7 +477,7 @@ final class RecordingController: ObservableObject {
         // current = nil 과 같은 메인 차례에 변환 중으로 올린다 — 그 사이에 받아쓰기가 끼어들지 않게. mix 안의 begin 은 같은 키라 무시된다.
         ConversionStatus.shared.begin(directory.lastPathComponent, appName: name)
         Task.detached {
-            await Self.mix(segments: segments, appName: name, startedAt: startedAt, removing: directory, prompt: true)
+            await Self.mix(segments: segments, appName: name, startedAt: startedAt, removing: directory, prompt: true, notifyIfShort: manual)
         }
     }
 
@@ -558,7 +559,7 @@ final class RecordingController: ObservableObject {
     /// 읽은 트랙이 하나도 없으면 Failed 로 옮긴다(다음 실행 때 끝없이 다시 복구하지 않게). 그 밖의 실패는 폴더를 남긴다.
     /// 녹음 폴더 안에 내보낸 뒤 메타(.json)를 먼저 쓰고 m4a 를 Pending 으로 옮긴다 — Pending 의 m4a 는 늘 다 쓴 파일이다.
     nonisolated private static func mix(segments: [[MixSource]], appName: String, startedAt: Date,
-                                        removing directory: URL, prompt: Bool) async {
+                                        removing directory: URL, prompt: Bool, notifyIfShort: Bool = false) async {
         // 긴 회의는 내보내기에 수십 초 걸린다 — 그동안 메뉴에 진행률을 보인다.
         let key = directory.lastPathComponent
         await ConversionStatus.shared.begin(key, appName: appName)
@@ -622,6 +623,7 @@ final class RecordingController: ObservableObject {
             guard duration >= minimumDuration else {
                 MicMonitor.log("버림 \(appName) \(Int(duration))초 < \(Int(minimumDuration))초")
                 try? FileManager.default.removeItem(at: directory)
+                if notifyIfShort { notify(String(localized: "\(Int(minimumDuration))초보다 짧은 녹음이라 저장하지 않았어요")) }
                 return
             }
 
