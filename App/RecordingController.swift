@@ -819,6 +819,8 @@ struct RecordingMeta: Codable {
     let duration: Int
     /// 왼쪽=나(마이크), 오른쪽=상대(맥 소리)로 나눠 만들었는지. 이 값이 생기기 전 json 은 없다(nil).
     let split: Bool?
+    /// 저장 창에 적은 참석자(받아쓰기 대기열에 넣을 때만). md 에서 오른쪽 화자 이름이 된다.
+    var attendees: String? = nil
 
     static func jsonURL(for m4a: URL) -> URL {
         m4a.deletingPathExtension().appendingPathExtension("json")

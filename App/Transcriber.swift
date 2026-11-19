@@ -782,17 +782,22 @@ extension Transcriber {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        let names = TranscriptionSettings.speakerNames
+        let me = TranscriptionSettings.speakerMe
+        // 오른쪽 화자는 저장 창의 참석자. 비었으면 "상대"
+        let attendees = (meta.attendees ?? "").split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let other = attendees.isEmpty ? String(localized: "상대") : attendees.joined(separator: ", ")
         var text = "# \(title)\n\n"
         text += "- \(String(localized: "날짜")): \(formatter.string(from: meta.startedAt))\n"
         text += "- \(String(localized: "길이")): \(duration / 3600):\(String(format: "%02d:%02d", duration / 60 % 60, duration % 60))\n"
         text += "- \(String(localized: "앱")): \(meta.appName)\n"
+        if !attendees.isEmpty { text += "- \(String(localized: "참석자")): \(attendees.joined(separator: ", "))\n" }
         for line in lines {
             let seconds = Int(line.time.rounded())
             let stamp = String(format: "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
             switch line.speaker {
-            case 0?: text += "\n**[\(stamp)] \(names.me):** \(line.text)\n"
-            case 1?: text += "\n**[\(stamp)] \(names.other):** \(line.text)\n"
+            case 0?: text += "\n**[\(stamp)] \(me):** \(line.text)\n"
+            case 1?: text += "\n**[\(stamp)] \(other):** \(line.text)\n"
             default: text += "\n**[\(stamp)]** \(line.text)\n"
             }
         }

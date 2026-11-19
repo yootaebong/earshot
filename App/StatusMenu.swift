@@ -234,7 +234,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             case .ready, .downloading:
                 menu.addItem(Self.label(String(localized: "받아쓰기 대기 \(transcriber.waitingCount)개")))
             case .missing, .failed:
-                menu.addItem(ActionItem(String(localized: "받아쓰기 대기 \(transcriber.waitingCount)개 — 모델 필요")) { SettingsWindow.show() })
+                menu.addItem(ActionItem(String(localized: "받아쓰기 대기 \(transcriber.waitingCount)개 — 모델 필요")) { TranscriptionSettingsWindow.show() })
             }
         }
         if case .downloading = models.state {
@@ -283,6 +283,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             menu.addItem(ActionItem(String(localized: "보내지 못한 파일 \(delivery.failedCount)개")) { NSWorkspace.shared.open(Delivery.failedURL) })
         }
         menu.addItem(ActionItem(String(localized: "저장 위치…")) { SettingsWindow.show() })
+        menu.addItem(ActionItem(String(localized: "받아쓰기 설정…")) { TranscriptionSettingsWindow.show() })
 
         let auto = NSMenu()
         auto.addItem(ActionItem(String(localized: "회의 앱이 마이크를 쓰면 자동 녹음"), isOn: autoSettings.isEnabled) { [weak self] in

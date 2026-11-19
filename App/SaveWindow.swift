@@ -161,7 +161,8 @@ final class SaveQueue: ObservableObject {
         Task {
             // 받아쓰기를 켠 분류면 보내기 전에 대기열로 복사한다(보내면 Pending 에서 지워진다). 복사 실패는 로그만 남기고 저장은 계속.
             if TranscriptionSettings.shared.transcribes(category.id) {
-                let queued = RecordingMeta(startedAt: date, appName: meta.appName, duration: meta.duration, split: meta.split)
+                let queued = RecordingMeta(startedAt: date, appName: meta.appName, duration: meta.duration, split: meta.split,
+                                           attendees: attendees)
                 await transcriber.enqueue(url, meta: queued, categoryID: category.id, fileName: name)
             }
             await delivery.send(url, category: category, fileName: name)
