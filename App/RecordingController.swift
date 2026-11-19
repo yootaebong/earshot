@@ -169,21 +169,36 @@ final class RecordingController: ObservableObject {
         }
     }
 
-    /// 탭은 조각 시작 때 객체로만 만든다. 녹음 중 대상 앱 객체가 늘면 새 객체까지 넣어 조각을 나눈다.
+    /// 탭은 조각 시작 때 객체로만 만든다. 녹음 중 대상 앱(맥 전체면 아무 앱) 객체가 늘면 새 객체까지 넣어 조각을 나눈다.
     private func checkTargetChange(_ apps: [MeetingApp]) {
-        guard var session, let target = session.app,
-              let app = apps.first(where: { $0.id == target.id }),
-              !session.knownObjectIDs.isSuperset(of: app.objectIDs) else { return }
+        guard var session, session.source != .micOnly else { return }
+        let ids: [AudioObjectID]
+        let label: String
+        if let target = session.app {
+            guard let app = apps.first(where: { $0.id == target.id }) else { return }
+            ids = app.objectIDs
+            label = app.appName
+        } else {
+            ids = apps.flatMap(\.objectIDs)
+            label = Self.globalName
+        }
+        guard !session.knownObjectIDs.isSuperset(of: ids) else { return }
         let before = session.knownObjectIDs.count
-        session.knownObjectIDs.formUnion(app.objectIDs)
+        session.knownObjectIDs.formUnion(ids)
         self.session = session
-        MicMonitor.log("탭 대상 바뀜 \(app.appName) 객체 \(before)→\(session.knownObjectIDs.count)")
+        MicMonitor.log("탭 대상 바뀜 \(label) 객체 \(before)→\(session.knownObjectIDs.count)")
         scheduleRotate("탭 대상 바뀜")
     }
 
-    /// 대상 앱의 지금 객체 목록. 앱이 목록에서 사라졌으면 시작 때 값. 전역 탭이면 nil.
+    /// 대상 앱의 지금 객체 목록. 앱이 목록에서 사라졌으면 시작 때 값.
+    /// 맥 전체는 EarShot 을 뺀 모든 앱의 객체 — 전역 탭(stereoGlobalTap)은 EarShot 이 마이크를 받는 경로까지 떠 담아
+    /// 내 목소리가 오른쪽(맥 소리)에 크게 들어갔다(11-19, 자기 객체를 빼도 그대로). 앱 지정 탭과 같은 방식으로 받는다.
+    /// 객체가 하나도 없을 때만 nil(전역 탭).
     private func currentObjectIDs(of app: MeetingApp?) -> [AudioObjectID]? {
-        guard let app else { return nil }
+        guard let app else {
+            let all = monitor.apps.flatMap(\.objectIDs)
+            return all.isEmpty ? nil : all
+        }
         return monitor.apps.first { $0.id == app.id }?.objectIDs ?? app.objectIDs
     }
 
@@ -369,7 +384,8 @@ final class RecordingController: ObservableObject {
 
         appMeter.reset()
         micMeter.reset()
-        guard let segment = startSegment(objectIDs: app?.objectIDs, source: source, name: name, index: 0,
+        let objectIDs = source == .micOnly ? nil : currentObjectIDs(of: app)
+        guard let segment = startSegment(objectIDs: objectIDs, source: source, name: name, index: 0,
                                          in: directory, micGranted: micGranted) else {
             try? FileManager.default.removeItem(at: directory)
             MicMonitor.log("녹음 시작 실패 \(name)")
@@ -377,12 +393,12 @@ final class RecordingController: ObservableObject {
         }
 
         session = Session(app: app, source: source, name: name, startedAt: startedAt, directory: directory, micGranted: micGranted,
-                          finished: [], segment: segment, knownObjectIDs: Set(app?.objectIDs ?? []))
+                          finished: [], segment: segment, knownObjectIDs: Set(objectIDs ?? []))
         current = (name, startedAt)
         live.elapsedText = "00:00"
         capturesAppSound = source != .micOnly
         startLevelTimer()
-        let target = source == .micOnly ? "마이크만" : app.map { "[\($0.appBundleID)] 객체=\($0.objectIDs.count)" } ?? "시스템 전체"
+        let target = source == .micOnly ? "마이크만" : app.map { "[\($0.appBundleID)] 객체=\($0.objectIDs.count)" } ?? "시스템 전체 객체=\(objectIDs?.count ?? 0)"
         MicMonitor.log("녹음 시작 \(name) \(target) 소리=\(segment.tap != nil) 마이크=\(segment.mic != nil)")
     }
 
