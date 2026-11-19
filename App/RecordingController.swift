@@ -29,6 +29,8 @@ final class RecordingController: ObservableObject {
     private static let silenceThreshold: Float = -80
     /// 장치 바뀜 알림이 입력·출력으로 겹쳐 오므로 이만큼 모아서 한 번만 조각을 나눈다.
     private static let deviceChangeDelay: TimeInterval = 0.5
+    /// 탭 대상 객체가 늘었을 때 나누기까지 기다리는 시간
+    private static let targetChangeDelay: TimeInterval = 3
     /// 새 조각 시작이 실패하면 이 간격으로 이만큼 다시 해 본다.
     private static let segmentRetryDelay: TimeInterval = 1
     private static let segmentRetryCount = 3
@@ -179,7 +181,7 @@ final class RecordingController: ObservableObject {
             ids = app.objectIDs
             label = app.appName
         } else {
-            ids = apps.flatMap(\.objectIDs)
+            ids = Self.otherProcessObjects()
             label = Self.globalName
         }
         guard !session.knownObjectIDs.isSuperset(of: ids) else { return }
@@ -187,19 +189,24 @@ final class RecordingController: ObservableObject {
         session.knownObjectIDs.formUnion(ids)
         self.session = session
         MicMonitor.log("탭 대상 바뀜 \(label) 객체 \(before)→\(session.knownObjectIDs.count)")
-        scheduleRotate("탭 대상 바뀜")
+        // 앱 하나가 켜질 때 도우미 객체가 1초 간격으로 따라 들어오므로 몰아서 한 번만 나눈다(나눌 때마다 마이크도 잠깐 끊긴다).
+        scheduleRotate("탭 대상 바뀜", delay: Self.targetChangeDelay)
     }
 
     /// 대상 앱의 지금 객체 목록. 앱이 목록에서 사라졌으면 시작 때 값.
     /// 맥 전체는 EarShot 을 뺀 모든 앱의 객체 — 전역 탭(stereoGlobalTap)은 EarShot 이 마이크를 받는 경로까지 떠 담아
     /// 내 목소리가 오른쪽(맥 소리)에 크게 들어갔다(11-19, 자기 객체를 빼도 그대로). 앱 지정 탭과 같은 방식으로 받는다.
-    /// 객체가 하나도 없을 때만 nil(전역 탭).
-    private func currentObjectIDs(of app: MeetingApp?) -> [AudioObjectID]? {
-        guard let app else {
-            let all = monitor.apps.flatMap(\.objectIDs)
-            return all.isEmpty ? nil : all
-        }
+    /// 전역 탭으로는 되돌아가지 않는다 — 객체가 없으면 탭이 실패해 그 조각은 마이크만 남고, 객체가 생기면 다시 나눈다.
+    private func currentObjectIDs(of app: MeetingApp?) -> [AudioObjectID] {
+        guard let app else { return Self.otherProcessObjects() }
         return monitor.apps.first { $0.id == app.id }?.objectIDs ?? app.objectIDs
+    }
+
+    /// EarShot 을 뺀 지금 Core Audio 프로세스 객체 전부. monitor.apps 는 최대 1초 묵어 죽은 객체가 섞일 수 있어 그때그때 읽는다.
+    private static func otherProcessObjects() -> [AudioObjectID] {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let objects: [AudioObjectID] = CoreAudioProperty.readArray(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyProcessObjectList)
+        return objects.filter { (CoreAudioProperty.read($0, kAudioProcessPropertyPID) as pid_t?) != ownPID }
     }
 
     /// 레코더가 조각을 나눠 달라고 할 때 부르는 콜백. 레코더는 메인에서 부른다.
@@ -292,11 +299,11 @@ final class RecordingController: ObservableObject {
         }
     }
 
-    private func scheduleRotate(_ reason: String) {
+    private func scheduleRotate(_ reason: String, delay: TimeInterval = deviceChangeDelay) {
         guard session != nil, retryingDirectory == nil, !rotateScheduled else { return }
         rotateScheduled = true
         rotateReason = reason
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.deviceChangeDelay) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.rotateScheduled = false
@@ -329,7 +336,7 @@ final class RecordingController: ObservableObject {
     private func startNextSegment(reason: String, attempt: Int) {
         guard var session else { return }
         let index = session.finished.count
-        let objectIDs = currentObjectIDs(of: session.app)
+        let objectIDs = session.source == .micOnly ? nil : currentObjectIDs(of: session.app)
         if let next = startSegment(objectIDs: objectIDs, source: session.source, name: session.name, index: index,
                                    in: session.directory, micGranted: session.micGranted) {
             retryingDirectory = nil
@@ -398,7 +405,7 @@ final class RecordingController: ObservableObject {
         live.elapsedText = "00:00"
         capturesAppSound = source != .micOnly
         startLevelTimer()
-        let target = source == .micOnly ? "마이크만" : app.map { "[\($0.appBundleID)] 객체=\($0.objectIDs.count)" } ?? "시스템 전체 객체=\(objectIDs?.count ?? 0)"
+        let target = source == .micOnly ? "마이크만" : app.map { "[\($0.appBundleID)] 객체=\(objectIDs?.count ?? 0)" } ?? "시스템 전체 객체=\(objectIDs?.count ?? 0)"
         MicMonitor.log("녹음 시작 \(name) \(target) 소리=\(segment.tap != nil) 마이크=\(segment.mic != nil)")
     }
 
