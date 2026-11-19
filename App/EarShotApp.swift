@@ -18,13 +18,15 @@ struct EarShotApp: App {
         let monitor = MicMonitor()
         let recorder = RecordingController(monitor: monitor)
         let delivery = Delivery()
+        let transcriber = Transcriber(recorder: recorder, delivery: delivery)
         AppDelegate.statusMenu = StatusMenu(
             monitor: monitor,
             recorder: recorder,
             loginItem: LoginItem(),
             delivery: delivery,
-            saveQueue: SaveQueue(delivery: delivery),
-            autoRecorder: AutoRecorder(monitor: monitor, recorder: recorder)
+            saveQueue: SaveQueue(delivery: delivery, transcriber: transcriber),
+            autoRecorder: AutoRecorder(monitor: monitor, recorder: recorder),
+            transcriber: transcriber
         )
     }
 

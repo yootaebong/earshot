@@ -35,6 +35,7 @@
 | ⏳ **변환 진행률** | 멈춘 뒤 m4a 로 바꾸는 동안 메뉴 막대에 진행률을 보여 줌(2시간 회의 약 40초) |
 | 🗂️ **편할 때 저장** | 회의가 끝나도 창이 화면을 가리지 않고 알림만 옴. 알림(또는 메뉴 "분류 안 됨")을 누르면 저장 창: 날짜·시간(녹음 시작 시각으로 채워짐)·주제·참석자 → 칸 고르기. "나중에"로 미뤄 두면 "분류 안 됨"에 남음 |
 | 🏷️ **칸 직접 정하기** | 설정에서 칸 이름 바꾸기·추가(최대 6개)·삭제, 칸마다 폴더 지정 |
+| 📝 **이 맥에서 받아쓰기(선택)** | 설정에서 칸마다 "받아쓰기"를 켜면, 그 칸으로 저장한 녹음을 녹음이 없을 때 [whisper.cpp](https://github.com/ggml-org/whisper.cpp)로 받아써 같은 폴더에 `같은 이름.md` 를 둠. 인터넷으로 보내지 않음. 처음 켤 때 모델(약 575MB)을 내려받음. 좌우로 나눈 녹음은 `**[00:01:23] 나:**`·`**[00:01:30] 상대:**` 처럼 화자를 붙이고, 섞인 녹음은 시각만. 화자 이름·언어(자동·한국어·영어·일본어·중국어)는 설정에서. 녹음 중에는 멈췄다가 끝나면 이어서 하고, 앱을 다시 켜도 대기열이 남음. Apple Silicon 기준 1시간 녹음(좌우)에 약 3~4분, 받아쓰는 동안 메모리 약 1GB. 인텔 맥은 훨씬 느릴 수 있음 |
 | 📤 **안정적인 전송** | 폴더가 안 붙어 있으면(예: NAS 볼륨) 보류함에 두고 60초마다·볼륨이 붙을 때 다시 보냄. 같은 이유로 5번 실패한 파일은 "보내지 못한 파일"로 따로 뺌 |
 | 🚀 **로그인 시 실행** | 맥을 켜면 자동으로 켜지고, 앱이 죽으면 다시 켜짐(메뉴 "종료"로 끈 건 다시 안 켬) |
 | 🌐 **한국어·영어** | macOS 언어 설정을 따름 |
@@ -60,6 +61,8 @@
 | `~/Library/Application Support/EarShot/Pending/` | 녹음이 끝나고 분류를 기다리는 m4a |
 | `~/Library/Application Support/EarShot/Outbox/<칸>/` | 보내기를 기다리는 파일(메뉴 "보낼 대기") |
 | `~/Library/Application Support/EarShot/Outbox/실패/` | 보내지 못한 파일(메뉴 "보내지 못한 파일") |
+| `~/Library/Application Support/EarShot/Models/` | 받아쓰기 모델(설정에서 지울 수 있음) |
+| `~/Library/Application Support/EarShot/Transcribe/<칸>/` | 받아쓰기를 기다리는 녹음 사본. 실패한 것은 `Transcribe/실패/` |
 | `~/Library/Logs/EarShot/detect.log` | 앱 기록(메뉴 "감지 로그 열기") |
 
 홈 폴더 안의 폴더는 없으면 자동으로 만듭니다. 외장·네트워크 볼륨(`/Volumes/…`)과 클라우드 동기화 폴더(`~/Library/CloudStorage/…`)는 만들지 않고 붙을 때까지 기다립니다.
@@ -133,7 +136,8 @@ rm /tmp/c.cnf /tmp/k.pem /tmp/c.pem /tmp/c.p12
 | `App/MicMonitor.swift` | 마이크를 쓰는 앱(회의 앱) 감지, 로그 |
 | `App/SaveWindow.swift` | 저장 창과 분류 대기열 |
 | `App/Delivery.swift` | 전송·재전송·파일 이름 |
-| `App/Settings.swift` | 칸·저장 위치·마이크·녹음할 소리 설정 |
+| `App/Settings.swift` | 칸·저장 위치·마이크·녹음할 소리·받아쓰기 설정 |
+| `App/Transcriber.swift` | 모델 내려받기, 받아쓰기 대기열, whisper.cpp 받아쓰기, md 만들기 |
 | `App/LoginItem.swift` | LaunchAgent 로그인 실행·자동 재시작 |
 | `App/GlobalHotKey.swift` | 전역 단축키 |
 | `App/AudioCapturePermission.swift` | 시스템 오디오 녹음 권한 요청 |

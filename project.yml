@@ -16,11 +16,18 @@ settings:
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
     SWIFT_EMIT_LOC_STRINGS: YES
+# 로컬 받아쓰기(whisper.cpp). 공식 릴리스 xcframework 를 감싼 로컬 패키지
+packages:
+  WhisperBinary:
+    path: Packages/WhisperBinary
 targets:
   EarShot:
     type: application
     platform: macOS
     sources: [App]
+    dependencies:
+      - package: WhisperBinary
+        product: whisper
     info:
       path: App/Info.plist
       properties:

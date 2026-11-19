@@ -450,6 +450,8 @@ final class RecordingController: ObservableObject {
 
         let directory = session.directory
         let name = session.name, startedAt = session.startedAt
+        // current = nil 과 같은 메인 차례에 변환 중으로 올린다 — 그 사이에 받아쓰기가 끼어들지 않게. mix 안의 begin 은 같은 키라 무시된다.
+        ConversionStatus.shared.begin(directory.lastPathComponent, appName: name)
         Task.detached {
             await Self.mix(segments: segments, appName: name, startedAt: startedAt, removing: directory, prompt: true)
         }
@@ -602,7 +604,8 @@ final class RecordingController: ObservableObject {
 
             let mixed = directory.appending(path: "mixed.m4a")
             try? FileManager.default.removeItem(at: mixed)
-            if AudioSettings.splitsChannels, !micTracks.isEmpty, !appTracks.isEmpty {
+            let split = AudioSettings.splitsChannels && !micTracks.isEmpty && !appTracks.isEmpty
+            if split {
                 try await renderSplit(composition, left: micTracks, right: appTracks, to: mixed, key: key)
             } else {
                 guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
@@ -619,7 +622,7 @@ final class RecordingController: ObservableObject {
                     if let error = export.error { throw error }
                 }
             }
-            let meta = RecordingMeta(startedAt: startedAt, appName: appName, duration: Int(duration.rounded()))
+            let meta = RecordingMeta(startedAt: startedAt, appName: appName, duration: Int(duration.rounded()), split: split ? true : nil)
             let output = try await moveToPending(mixed, meta: meta)
             MicMonitor.log("저장 \(output.path) \(Int(duration))초")
             try? FileManager.default.removeItem(at: directory)
@@ -814,6 +817,8 @@ struct RecordingMeta: Codable {
     let startedAt: Date
     let appName: String
     let duration: Int
+    /// 왼쪽=나(마이크), 오른쪽=상대(맥 소리)로 나눠 만들었는지. 이 값이 생기기 전 json 은 없다(nil).
+    let split: Bool?
 
     static func jsonURL(for m4a: URL) -> URL {
         m4a.deletingPathExtension().appendingPathExtension("json")
@@ -841,7 +846,7 @@ struct RecordingMeta: Codable {
         let modified = (try? m4a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date()
         var app = base.count > 16 ? String(base.dropFirst(16)) : String(localized: "알 수 없음")
         if let range = app.range(of: #"-\d+$"#, options: .regularExpression) { app.removeSubrange(range) }
-        return RecordingMeta(startedAt: formatter.date(from: stamp) ?? modified, appName: app, duration: 0)
+        return RecordingMeta(startedAt: formatter.date(from: stamp) ?? modified, appName: app, duration: 0, split: nil)
     }
 }
 
