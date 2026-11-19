@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>저장 위치</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main>
+      <p class="muted">분류 버튼을 누르면 녹음이 그 분류의 폴더로 가요.</p>
+      <ul id="list" class="rows"></ul>
+      <div class="actions">
+        <span class="spacer"></span>
+        <button id="add" type="button">추가</button>
+      </div>
+      <p id="error" class="error" hidden></p>
+    </main>
+    <script type="module" src="/src/settings.ts"></script>
+  </body>
+</html>

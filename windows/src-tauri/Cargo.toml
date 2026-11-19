@@ -1,0 +1,30 @@
+[package]
+name = "earshot"
+version = "1.4.1"
+description = "EarShot — 회의 녹음 트레이 앱(윈도우)"
+authors = ["Taebong Yoo"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+# bin 이름과 겹치지 않게 _lib 을 붙인다(윈도우에서 문제, cargo#8519).
+name = "earshot_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+cpal = "0.15"
+hound = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+dirs = "6"
+anyhow = "1"
