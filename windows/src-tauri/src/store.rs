@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub const APP_NAME: &str = "EarShot";
 /// 시스템 전체를 녹음할 때 파일 이름·저장 창의 앱 자리
-pub const GLOBAL_APP_NAME: &str = "시스템 전체";
+pub const GLOBAL_APP_NAME: &str = "전체";
 pub const MIN_CATEGORIES: usize = 1;
 pub const MAX_CATEGORIES: usize = 6;
 /// Recording 아래 녹음 폴더 이름(시작 시각)
@@ -393,13 +393,13 @@ mod tests {
     fn 기본_이름() {
         assert_eq!(
             file_name(&at(), GLOBAL_APP_NAME, " 주간  회의 ", "철수, 영희,,"),
-            "2026-11-20-1405-시스템 전체-주간 회의-참석 철수,영희.wav"
+            "2026-11-20-1405-전체-주간 회의-참석 철수,영희.wav"
         );
     }
 
     #[test]
     fn 못_쓰는_문자_제거() {
-        assert_eq!(file_name(&at(), "", "a/b:c?", ""), "2026-11-20-1405-시스템 전체-abc.wav");
+        assert_eq!(file_name(&at(), "", "a/b:c?", ""), "2026-11-20-1405-전체-abc.wav");
     }
 
     #[test]
