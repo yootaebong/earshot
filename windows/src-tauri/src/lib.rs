@@ -201,7 +201,7 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
     match event.id().0.as_str() {
         MENU_TOGGLE => toggle_recording(app),
         MENU_PENDING => open_save(app, None),
-        MENU_STORAGE => open_window(app, SETTINGS_LABEL, "settings.html", "저장 위치", 560.0, 460.0),
+        MENU_STORAGE => open_storage_window(app),
         MENU_LOGIN => {
             let autolaunch = app.autolaunch();
             let result = if autolaunch.is_enabled().unwrap_or(false) {
@@ -241,6 +241,7 @@ fn open_window(app: &AppHandle, label: &str, page: &str, title: &str, width: f64
         .title(title)
         .inner_size(width, height)
         .resizable(false)
+        .maximizable(false)
         .center()
         .focused(true)
         .build();
@@ -250,7 +251,11 @@ fn open_window(app: &AppHandle, label: &str, page: &str, title: &str, width: f64
 }
 
 fn show_save_window(app: &AppHandle) {
-    open_window(app, SAVE_LABEL, "save.html", "녹음 저장", 480.0, 460.0);
+    open_window(app, SAVE_LABEL, "save.html", "녹음 저장", 480.0, 390.0);
+}
+
+fn open_storage_window(app: &AppHandle) {
+    open_window(app, SETTINGS_LABEL, "settings.html", "저장 위치", 560.0, 460.0);
 }
 
 /// id 가 없으면 가장 오래된 분류 안 된 녹음을 연다.
@@ -365,7 +370,8 @@ async fn trash_pending(app: AppHandle, id: String) -> Result<(), String> {
 pub fn run() {
     let app = tauri::Builder::default()
         // single-instance 는 가장 먼저 붙인다.
-        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        // 이미 떠 있는데 시작 메뉴로 다시 실행하면 저장 위치 창을 연다 — 트레이를 못 찾는 사람도 설정에 닿게.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| open_storage_window(app)))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
