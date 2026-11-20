@@ -35,4 +35,4 @@ pnpm tauri build
 
 ## 아이콘
 
-`src-tauri/icons/` 는 logroom 아이콘을 복사한 **임시 아이콘**이다.
+`src-tauri/icons/` 는 맥 앱 아이콘(`app-icon.png`)에서 `pnpm tauri icon app-icon.png` 로 만든다.
