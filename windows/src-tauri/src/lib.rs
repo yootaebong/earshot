@@ -201,7 +201,7 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
     match event.id().0.as_str() {
         MENU_TOGGLE => toggle_recording(app),
         MENU_PENDING => open_save(app, None),
-        MENU_STORAGE => open_window(app, SETTINGS_LABEL, "settings.html", "저장 위치", 640.0, 420.0),
+        MENU_STORAGE => open_window(app, SETTINGS_LABEL, "settings.html", "저장 위치", 560.0, 460.0),
         MENU_LOGIN => {
             let autolaunch = app.autolaunch();
             let result = if autolaunch.is_enabled().unwrap_or(false) {
@@ -250,7 +250,7 @@ fn open_window(app: &AppHandle, label: &str, page: &str, title: &str, width: f64
 }
 
 fn show_save_window(app: &AppHandle) {
-    open_window(app, SAVE_LABEL, "save.html", "녹음 저장", 480.0, 300.0);
+    open_window(app, SAVE_LABEL, "save.html", "녹음 저장", 480.0, 460.0);
 }
 
 /// id 가 없으면 가장 오래된 분류 안 된 녹음을 연다.

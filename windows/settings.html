@@ -8,14 +8,14 @@
   </head>
   <body>
     <main>
-      <p class="muted">분류 버튼을 누르면 녹음이 그 분류의 폴더로 가요.</p>
+      <p class="hint">분류 버튼을 누르면 녹음이 그 분류의 폴더로 가요.</p>
       <ul id="list" class="rows"></ul>
-      <div class="actions">
-        <span class="spacer"></span>
-        <button id="add" type="button">추가</button>
-      </div>
-      <p id="error" class="error" hidden></p>
+      <p id="error" class="error" role="alert" hidden></p>
     </main>
+    <footer class="bar">
+      <span class="spacer"></span>
+      <button id="add" type="button" class="accent">추가</button>
+    </footer>
     <script type="module" src="/src/settings.ts"></script>
   </body>
 </html>

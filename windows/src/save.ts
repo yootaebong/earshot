@@ -57,7 +57,7 @@ function setDisabled(disabled: boolean): void {
 function categoryButton(category: Category): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "primary";
+  button.className = "accent";
   button.textContent = category.name;
   button.title = category.path;
   button.addEventListener("click", () => void save(category.id));

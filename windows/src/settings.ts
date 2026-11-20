@@ -73,6 +73,21 @@ function row(category: Category): HTMLLIElement {
     void update(category.id, { name: trimmed });
   });
 
+  const pathRow = document.createElement("div");
+  pathRow.className = "row-path";
+  const folderIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  folderIcon.setAttribute("width", "16");
+  folderIcon.setAttribute("height", "16");
+  folderIcon.setAttribute("viewBox", "0 0 16 16");
+  folderIcon.setAttribute("aria-hidden", "true");
+  const folderShape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  folderShape.setAttribute("d", "M1.5 4.5A1 1 0 0 1 2.5 3.5h3.2l1.3 1.5h6.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z");
+  folderShape.setAttribute("fill", "none");
+  folderShape.setAttribute("stroke", "currentColor");
+  folderShape.setAttribute("stroke-width", "1.1");
+  folderShape.setAttribute("stroke-linejoin", "round");
+  folderIcon.append(folderShape);
+
   const path = document.createElement("span");
   path.className = "path";
   path.textContent = category.path;
@@ -85,11 +100,19 @@ function row(category: Category): HTMLLIElement {
 
   const remove = document.createElement("button");
   remove.type = "button";
-  remove.textContent = "삭제";
+  remove.className = "subtle icon danger";
+  remove.title = "삭제";
+  remove.setAttribute("aria-label", "삭제");
+  remove.innerHTML =
+    '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M6.8 7v4M9.2 7v4" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   remove.disabled = categories.length <= MIN_CATEGORIES;
   remove.addEventListener("click", () => void commit(categories.filter((c) => c.id !== category.id)));
 
-  item.append(name, path, choose, remove);
+  const top = document.createElement("div");
+  top.className = "row-top";
+  top.append(name, choose, remove);
+  pathRow.append(folderIcon, path);
+  item.append(top, pathRow);
   return item;
 }
 

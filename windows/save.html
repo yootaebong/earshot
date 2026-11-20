@@ -8,20 +8,29 @@
   </head>
   <body>
     <main>
-      <p id="summary" class="muted"></p>
-      <form id="form" class="fields">
+      <header class="head">
+        <svg class="rec-icon" width="32" height="32" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="15" fill="none" stroke="#c42b1c" stroke-opacity="0.3" stroke-width="2" />
+          <circle cx="16" cy="16" r="8" fill="#c42b1c" />
+        </svg>
+        <div class="head-text">
+          <h1>녹음 저장</h1>
+          <p id="summary" class="chip"></p>
+        </div>
+      </header>
+      <form id="form" class="card fields">
         <label>날짜·시간 <input id="date" type="datetime-local" required /></label>
         <label>주제 <input id="topic" type="text" autocomplete="off" /></label>
         <label>참석자 <input id="attendees" type="text" placeholder="쉼표로 구분(선택)" autocomplete="off" /></label>
       </form>
-      <div class="actions">
-        <button id="later" type="button">나중에</button>
-        <button id="trash" type="button">삭제…</button>
-        <span class="spacer"></span>
-        <div id="categories" class="categories"></div>
-      </div>
-      <p id="error" class="error" hidden></p>
+      <p id="error" class="error" role="alert" hidden></p>
     </main>
+    <footer class="bar">
+      <button id="later" type="button">나중에</button>
+      <button id="trash" type="button" class="subtle danger">삭제…</button>
+      <span class="spacer"></span>
+      <div id="categories" class="categories"></div>
+    </footer>
     <script type="module" src="/src/save.ts"></script>
   </body>
 </html>
